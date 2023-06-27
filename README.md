@@ -306,3 +306,106 @@ HTTP/1.1 404
 Content-Length: 0
 Date: Tue, 27 Jun 2023 16:07:49 GMT
 ````
+
+---
+
+# Spring Security con JWT
+
+A partir de esta sección iniciamos el desarrollo del proyecto como plantilla usando JWT con Spring Security.
+
+## Nuevas dependencias
+
+Existen muchas librerías que nos ayudan a crear, firmar, verificar, etc. un JWT. Vi en muchos
+tutoriales que he realizado, el uso de dos de ellas con mayor frecuencia: [**jwtk/jjwt**](https://github.com/jwtk/jjwt)
+y el [**auth0/java-jwt**](https://github.com/auth0/java-jwt). En nuestro caso, optaré por usar la segunda librería
+**(auth0/java-jwt),** ya que según lo investigado es más robusto que el otro que es un poco más liviano.
+
+````xml
+
+<dependencies>
+    <!--Dependencias para Spring Security-->
+    <dependency>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-starter-security</artifactId>
+    </dependency>
+    <dependency>
+        <groupId>org.springframework.security</groupId>
+        <artifactId>spring-security-test</artifactId>
+        <scope>test</scope>
+    </dependency>
+
+    <!--Dependencia de auth0/java-jwt para trabajar con JWT-->
+    <dependency>
+        <groupId>com.auth0</groupId>
+        <artifactId>java-jwt</artifactId>
+        <version>4.4.0</version>
+    </dependency>
+</dependencies>
+````
+
+## Comportamiento por defecto
+
+Tan solo agregando la dependencia de **Spring Security**, basta para tener nuestra aplicación asegurada por defecto. Es
+decir, para poder acceder a algún endpoint, necesito autenticarme. Por defecto, Spring Security agrega el
+**Http Basic Authentication** y el **Form Login Authentication**, esto significa que, al acceder con **curl** o
+**postman** se hará uso del **Http Basic Authentication**, mientras que si accedemos usando un navegador web, se
+activará el filtro de **Form Login Authentication**.
+
+A continuación se muestran los ejemplos:
+
+Accediendo a la lista de productos usando curl. Tenemos que agregar el usuario **user** y la contraseña generada de
+aleatoriamente en la consola:
+
+````bash
+curl -i -u user:01f90fdc-9566-4694-a3cc-cd8a2855f0f2 http://localhost:8080/api/v1/products
+HTTP/1.1 200
+X-Content-Type-Options: nosniff
+X-XSS-Protection: 0
+Cache-Control: no-cache, no-store, max-age=0, must-revalidate
+Pragma: no-cache
+Expires: 0
+X-Frame-Options: DENY
+Content-Type: application/json
+Transfer-Encoding: chunked
+Date: Tue, 27 Jun 2023 21:47:20 GMT
+
+[ 
+  {"id":1,"name":"Pc gamer","price":3500.0},
+  {"id":2,"name":"Teclado inalámbrico","price":150.8},
+  {"id":3,"name":"Mouse inalámbrico","price":99.9},
+  {"id":4,"name":"Celular Samsung A7","price":5900.0}
+]
+````
+
+Accediendo a la lista de productos usando el navegador web. Al hacerlo veremos que nos redireccionará a un formulario
+de Login para poder ingresar el usuario **user** y la contraseña generada aleatoriamente en la consola. Luego de
+ingresar las credenciales e iniciar sesión, nos redirecciona a la ruta que solicitamos inicialmente:
+
+````
+http://localhost:8080/api/v1/products?continue
+````
+
+````json
+[
+  {
+    "id": 1,
+    "name": "Pc gamer",
+    "price": 3500
+  },
+  {
+    "id": 2,
+    "name": "Teclado inalámbrico",
+    "price": 150.8
+  },
+  {
+    "id": 3,
+    "name": "Mouse inalámbrico",
+    "price": 99.9
+  },
+  {
+    "id": 4,
+    "name": "Celular Samsung A7",
+    "price": 5900
+  }
+]
+````
