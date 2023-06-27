@@ -427,3 +427,40 @@ Para decidir si autorizar la solicitud, el **Authorization Filter** utiliza los 
 Las imágenes mostradas anteriormente serán tomadas como referencia al momento de ir construyendo el proyecto de
 seguridad con JWT.
 
+## Creando la Entity User
+
+Creamos nuestra entidad **User** que será la que mapearemos con la tabla **users** de la base de datos.
+
+````java
+
+@Entity
+@Table(name = "users")
+public class User {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+    private String firstName;
+    private String lastName;
+    private String username;
+    private String password;
+    @Enumerated(EnumType.STRING)
+    private Role role;
+
+    /* omitted setters and getters */
+}
+````
+
+El rol y las authorities dependerán de la lógica de negocio al que se esté aplicando. Así pues, en este proyecto
+**trabajaremos solo con roles**, en tal sentido, un usuario tendrá asignado un único rol.
+
+````java
+public enum Role {
+    USER, ADMIN, SUPER_ADMIN
+}
+````
+
+**NOTA**
+> Recordar que roles y authorities son dos cosas distintas. Digamos que Roles es más amplio y contienen authorities.
+> Además, a los authorities se les conoce como permisos. En ese sentido, un rol puede tener muchos authorities o
+> permisos.
+
