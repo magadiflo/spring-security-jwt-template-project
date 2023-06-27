@@ -85,3 +85,75 @@ public class Product {
 public interface ProductRepository extends JpaRepository<Product, Long> {
 }
 ````
+
+## Capa de servicio
+
+Crearemos una interfaz por buenas prácticas y la implementación del mismo:
+
+````java
+public interface ProductService {
+    List<Product> findAllProducts();
+
+    Optional<Product> findProductById(Long id);
+
+    Product saveProduct(Product product);
+
+    Optional<Product> updateProduct(Long id, Product product);
+
+    Optional<Boolean> deleteProduct(Long id);
+}
+````
+
+Hacemos inyección de dependencia de nuestro repositorio para poder hacer las operaciones hacia la base de datos.
+
+````java
+
+@Service
+public class ProductServiceImpl implements ProductService {
+
+    private final ProductRepository productRepository;
+
+    public ProductServiceImpl(ProductRepository productRepository) {
+        this.productRepository = productRepository;
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<Product> findAllProducts() {
+        return this.productRepository.findAll();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Optional<Product> findProductById(Long id) {
+        return this.productRepository.findById(id);
+    }
+
+    @Override
+    @Transactional
+    public Product saveProduct(Product product) {
+        return this.productRepository.save(product);
+    }
+
+    @Override
+    @Transactional
+    public Optional<Product> updateProduct(Long id, Product product) {
+        return this.productRepository.findById(id)
+                .map(productDB -> {
+                    productDB.setName(product.getName());
+                    productDB.setPrice(product.getPrice());
+                    return this.productRepository.save(productDB);
+                });
+    }
+
+    @Override
+    @Transactional
+    public Optional<Boolean> deleteProduct(Long id) {
+        return this.productRepository.findById(id)
+                .map(productDB -> {
+                    this.productRepository.deleteById(productDB.getId());
+                    return true;
+                });
+    }
+}
+````
