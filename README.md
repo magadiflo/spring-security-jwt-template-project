@@ -207,3 +207,102 @@ public class ProductController {
     }
 }
 ````
+
+## Probando endpoints
+
+Se muestran los 5 endpoints expuestos por nuestra API. Aquí hacemos pruebas **sin tener Spring Security.**
+
+### Listar todos los productos
+
+````bash
+curl -i http://localhost:8080/api/v1/products
+HTTP/1.1 200
+Content-Type: application/json
+Transfer-Encoding: chunked
+Date: Tue, 27 Jun 2023 15:55:45 GMT
+
+[
+  {"id":1,"name":"Pc gamer","price":3500.0},
+  {"id":2,"name":"Teclado inalámbrico","price":150.8},
+  {"id":3,"name":"Mouse inalámbrico","price":99.9},
+  {"id":4,"name":"Celular Samsung A7","price":5900.0}
+]
+````
+
+### Ver un producto
+
+Producto existente con id = 3:
+
+````bash
+curl -i http://localhost:8080/api/v1/products/3
+HTTP/1.1 200
+Content-Type: application/json
+Transfer-Encoding: chunked
+Date: Tue, 27 Jun 2023 15:57:30 GMT
+
+{"id":3,"name":"Mouse inalámbrico","price":99.9}
+````
+
+Producto no existente con id = 50
+
+````bash
+curl -i http://localhost:8080/api/v1/products/50
+HTTP/1.1 404
+Content-Length: 0
+Date: Tue, 27 Jun 2023 16:04:16 GMT
+````
+
+### Guardar un producto
+
+````bash
+curl -i -X POST -H "Content-Type: application/json" -d "{\"name\": \"Monitor LG 27'\", \"price\": 780.50}" http://localhost:8080/api/v1/products
+HTTP/1.1 201
+Location: /api/v1/products/5
+Content-Type: application/json
+Transfer-Encoding: chunked
+Date: Tue, 27 Jun 2023 15:59:40 GMT
+
+{"id":5,"name":"Monitor LG 27'","price":780.5}
+````
+
+### Actualizar un producto
+
+Actualizar producto existente con id = 5:
+
+````bash
+curl -i -X PUT -H "Content-Type: application/json" -d "{\"name\": \"Monitor LG 32' Ultra HD\", \"price\": 1200.00}" http://localhost:8080/api/v1/products/5
+HTTP/1.1 200
+Content-Type: application/json
+Transfer-Encoding: chunked
+Date: Tue, 27 Jun 2023 16:01:54 GMT
+
+{"id":5,"name":"Monitor LG 32' Ultra HD","price":1200.0}
+````
+
+Actualizar producto no existente con id = 60:
+
+````bash
+curl -i -X PUT -H "Content-Type: application/json" -d "{\"name\": \"Parlantes chicos\", \"price\": 48}" http://localhost:8080/api/v1/products/60
+HTTP/1.1 404
+Content-Length: 0
+Date: Tue, 27 Jun 2023 16:07:07 GMT
+````
+
+### Eliminar un producto
+
+Eliminando producto existente con id = 5:
+
+````bash
+curl -i -X DELETE http://localhost:8080/api/v1/products/5
+HTTP/1.1 204
+Date: Tue, 27 Jun 2023 16:03:05 GMT
+````
+
+Eliminando producto no existente con id = 74:
+
+````bash
+curl -i -X DELETE http://localhost:8080/api/v1/products/74
+HTTP/1.1 404
+Content-Length: 0
+Date: Tue, 27 Jun 2023 16:07:49 GMT
+````
