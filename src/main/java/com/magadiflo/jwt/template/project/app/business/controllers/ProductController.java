@@ -2,10 +2,10 @@ package com.magadiflo.jwt.template.project.app.business.controllers;
 
 import com.magadiflo.jwt.template.project.app.business.entities.Product;
 import com.magadiflo.jwt.template.project.app.business.services.ProductService;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.net.URI;
 import java.util.List;
 
 @RestController
@@ -31,8 +31,9 @@ public class ProductController {
 
     @PostMapping
     public ResponseEntity<Product> saveProduct(@RequestBody Product product) {
-        return ResponseEntity.status(HttpStatus.CREATED)
-                .body(this.productService.saveProduct(product));
+        Product productDB = this.productService.saveProduct(product);
+        URI productURI = URI.create("/api/v1/products/" + productDB.getId());
+        return ResponseEntity.created(productURI).body(productDB);
     }
 
     @PutMapping(path = "/{id}")
