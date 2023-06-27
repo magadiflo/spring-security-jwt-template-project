@@ -409,3 +409,21 @@ http://localhost:8080/api/v1/products?continue
   }
 ]
 ````
+
+## Componentes principales que actúan en el proceso de Autenticación y Authorización en Spring Security
+
+A modo de repaso general, es importante tener conocimiento del siguiente esquema donde muestra los componentes
+principales que actúan en el proceso de autenticación en Spring Security obtenido del libro de
+[**Spring Security In Action 2020**](https://github.com/magadiflo/spring-security-in-action-2020.git)
+
+![Main-components-authentication-spring-security](./assets/01.Main-components-authentication-spring-security.png)
+
+Después de una autenticación exitosa, el **Authentication Filter** almacena los detalles del usuario en el **Security
+context** y reenvía la solicitud al **Authorization Filter**. El filtro de autorización decide si se permite la llamada.
+Para decidir si autorizar la solicitud, el **Authorization Filter** utiliza los detalles del contexto de seguridad.
+
+![Flow-authorization](./assets/02.Flow-authorization.png)
+
+Las imágenes mostradas anteriormente serán tomadas como referencia al momento de ir construyendo el proyecto de
+seguridad con JWT.
+
