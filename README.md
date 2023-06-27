@@ -464,3 +464,14 @@ public enum Role {
 > Además, a los authorities se les conoce como permisos. En ese sentido, un rol puede tener muchos authorities o
 > permisos.
 
+## Repositorio para User
+
+Creamos el repositorio de User para hacer consultas a la base de datos. Además, definimos un método personalizado que
+nos retornará un User en función de su username:
+
+````java
+public interface UserRepository extends JpaRepository<User, Long> {
+    Optional<User> findUserByUsername(String username);
+}
+````
+
