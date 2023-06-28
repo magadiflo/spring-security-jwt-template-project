@@ -548,3 +548,47 @@ public class SecurityUser implements UserDetails {
 > Nuestro modelo de usuario SecurityUser es un usuario reconocido dentro de la arquitectura de Spring Security y eso es
 > porque hace una implementación de la interfaz **UserDetails**.
 
+## Creando implementación del UserDetailsService y PasswordEncoder
+
+Crearemos una clase de servicio que implemente la interfaz **UserDetailsService** y lo anotaremos con **@Service** para
+que se convierta en un **bean** manejado por el contenedor de Spring.
+
+````java
+
+@Service
+public class UserDetailsServiceImpl implements UserDetailsService {
+    private final UserRepository userRepository;
+
+    public UserDetailsServiceImpl(UserRepository userRepository) {
+        this.userRepository = userRepository;
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
+        return this.userRepository.findUserByUsername(username)
+                .map(SecurityUser::new)
+                .orElseThrow(() -> new UsernameNotFoundException("Username no encontrado en la BD!"));
+    }
+}
+````
+
+Nuestra clase UserDetailsServiceImpl implementa a **UserDetailsService**, y con él su método **loadUserByUsername()**,
+que nos devolverá una implementación de un usuario reconocido en la arquitectura de Spring Security, un **UserDetails**
+cuya implementación la definimos en la sección anterior, el **SecurityUser**, caso contrario nos lanzará la excepción
+**UsernameNotFoundException**.
+
+Con respecto al **PasswordEncoder**, creamos una clase de configuración general para exponer beans relacionados a la
+configuración de Spring Security, en este caso, para el **PasswordEncoder** creamos un método que nos devuelve un
+**BCryptPasswordEncoder** como implementación del **PasswordEncoder**:
+
+````java
+
+@Configuration
+public class SecurityConfig {
+    @Bean
+    public PasswordEncoder passwordEncoder() {
+        return new BCryptPasswordEncoder();
+    }
+}
+````
