@@ -547,6 +547,18 @@ public class SecurityUser implements UserDetails {
 **NOTA**
 > Nuestro modelo de usuario SecurityUser es un usuario reconocido dentro de la arquitectura de Spring Security y eso es
 > porque hace una implementación de la interfaz **UserDetails**.
+>
+> El método getAuthorities() nos retorna una lita de Authorities o Roles o la mezcla de ambos, es decir, en este punto
+> Spring Security no hace una distinción y trata a ambos como authorities, entonces, **¿dónde se ve la diferencia?**,
+> esta diferencia radica cuando se aseguran los métodos ya sea usando **hasAuthority(...) o hasAnyAuthority(...)** en
+> donde aquí se usarán los authorities o permisos definidos en nuestra lista, y si los métodos se aseguran con
+> **hasRole(...) o con hasAnyRole(...)** aquí se usarán los roles definidos en nuestra lista.
+>
+> Es importante, cuando definamos en la lista del método **getAuthorities()** nuestros roles tengan el prefijo "ROLE_",
+> mientras que los authorities se usan tal cual lo estemos definiendo, por ejemplo, aunque no es nuestro caso, ya que
+> solo estamos trabajando con roles, podríamos haber definido nuestros authorities de la siguiente manera: **user:read,
+> user:write, admin:write, admin:read, delete, read, write, update, etc**, la forma cómo definamos nuestros authorities
+> o permisos ya depende de nosotros.
 
 ## Creando implementación del UserDetailsService y PasswordEncoder
 
@@ -591,4 +603,75 @@ public class SecurityConfig {
         return new BCryptPasswordEncoder();
     }
 }
+````
+
+## Testeando la aplicación hasta este punto
+
+Hasta el momento hemos creado una implementación del **UserDetailsService** y del **PasswordEncoder**, también del
+**UserDetails**, pero enfoquémonos en el **UserDetailsService y PasswordEncoder** que son dos elementos importantes
+para poder explicar el flujo en el proceso de Autenticación.
+
+Como vimos, por defecto, cuando agregamos la dependencia de Spring Security, nuestra aplicación queda asegurada usando
+**HTTP Basic Authentication y Form Login Authentication**, además vimos cuáles son los componentes que interactúan en
+el flujo del proceso de Authentication en Spring Security **(ver diagrama)**. Dos de esos componentes son el
+**UserDetailsService y el PasswordEncoder** que son utilizados por la implementación del **AuthenticationProvider**
+para realizar la lógica de autenticación.
+
+Cuando creamos nuestra implementación del **UserDetailsService** sobreescribimos la implementación
+que por defecto viene en Spring Security, eso significa que ahora **en consola no nos mostrará un password aleatorio**,
+ni el usuario por defecto será **user**, sino que ahora, al definir nuestra propia implementación del
+**UserDetailsService** cogeremos los usuarios de la base de datos. Además, al sobreescribir el **UserDetailsService**
+que viene por defecto, dejamos anulado el **PasswordEncoder** usado en esa implementación, eso significa que debemos
+crear una implementación de un **PasswordEncoder** y registrarlo como un bean, ya que de lo contrario, si solo
+sobreescribimos la implementación por defecto del UserDetailsService sin crear una implementación de un PasswordEncoder
+la aplicación nos arrojará el siguiente error:
+
+````
+java.lang.IllegalArgumentException: There is no PasswordEncoder mapped for the id "null"
+````
+
+El error anterior significa que **no hay una implementación de un PasswordEncoder**. Por lo tanto, cuando creemos
+nuestra propia implementación del **UserDetailsService** del mismo modo debemos crear la implementación del
+**PasswordEncoder**
+
+En este proyecto estoy usando una clase que implementa el UserDetailsService y lo estoy anotando con **@Service** para
+que sea manejado por el contenedor de Spring, aunque también podría haberlo creado anotando un método con **@Bean** y
+retornando una implementación del UserDetailsService, tal como se vino realizando en el libro de **Spring Security In
+Action 2020**, aunque en el libro también se vio la implementación del UserDetailsService a través de una clase anotada
+con **@Service**.
+
+Con el **usuario de la base de datos** definido en el archivo **import.sql** vemos el detalle de un producto:
+
+````bash
+curl -i -u martin:12345 http://localhost:8080/api/v1/products/1
+HTTP/1.1 200
+X-Content-Type-Options: nosniff
+X-XSS-Protection: 0
+Cache-Control: no-cache, no-store, max-age=0, must-revalidate
+Pragma: no-cache
+Expires: 0
+X-Frame-Options: DENY
+Content-Type: application/json
+Transfer-Encoding: chunked
+Date: Wed, 28 Jun 2023 16:35:23 GMT
+
+{"id":1,"name":"Pc gamer","price":3500.0}
+````
+
+Si no le mandamos ningún usuario:
+
+````bash
+curl -i http://localhost:8080/api/v1/products/1
+HTTP/1.1 401
+Set-Cookie: JSESSIONID=126880F8CB33106D3ACF3DED5C34CB22; Path=/; HttpOnly
+WWW-Authenticate: Basic realm="Realm"
+X-Content-Type-Options: nosniff
+X-XSS-Protection: 0
+Cache-Control: no-cache, no-store, max-age=0, must-revalidate
+Pragma: no-cache
+Expires: 0
+X-Frame-Options: DENY
+WWW-Authenticate: Basic realm="Realm"
+Content-Length: 0
+Date: Wed, 28 Jun 2023 16:38:22 GMT
 ````
