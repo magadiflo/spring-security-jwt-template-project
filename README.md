@@ -475,3 +475,15 @@ public interface UserRepository extends JpaRepository<User, Long> {
 }
 ````
 
+## Creación de usuarios con roles
+
+Para no estar registrando manualmente los usuarios que utilizaremos en el sistema, agregaré las instrucciones en el
+**import.sql** para que se agreguen cada vez que iniciemos la aplicación. Como se observa, tendremos tres usuarios,
+para poder probar los tres roles que creamos, además, notar que el password ya se encuentra hasheado, el valor
+original es **12345** para los tres.
+
+````
+INSERT INTO users(first_name, last_name, username, password, role) VALUES('Martín', 'Díaz', 'martin', '$2a$10$jI7KjaUItqfNp.3RHRTCTOlglEwd5YWYlY/klOYccx/wWZpcrPrmO', 'SUPER_ADMIN');
+INSERT INTO users(first_name, last_name, username, password, role) VALUES('Elizabeth', 'Tello', 'eli', '$2a$10$b7Fkn.Rm36pw7LojoRKQuOUF.elMZYm6ScR6TciKuqc1pj8XpW9Fa', 'ADMIN');
+INSERT INTO users(first_name, last_name, username, password, role) VALUES('Nuria', 'Corneio', 'nuria', '$2a$10$UVX62X4pPzpIBYaCC28EpuQMbVuRVaYyFStb2bhVrC3L.TNdsJhf.', 'USER');
+````
