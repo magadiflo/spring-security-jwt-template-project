@@ -1,6 +1,6 @@
 package com.magadiflo.jwt.template.project.app.security.models.entities;
 
-import com.magadiflo.jwt.template.project.app.security.enumeration.Role;
+import com.magadiflo.jwt.template.project.app.security.enums.Role;
 import jakarta.persistence.*;
 
 @Entity

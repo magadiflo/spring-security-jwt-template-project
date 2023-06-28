@@ -487,3 +487,64 @@ INSERT INTO users(first_name, last_name, username, password, role) VALUES('Mart�
 INSERT INTO users(first_name, last_name, username, password, role) VALUES('Elizabeth', 'Tello', 'eli', '$2a$10$b7Fkn.Rm36pw7LojoRKQuOUF.elMZYm6ScR6TciKuqc1pj8XpW9Fa', 'ADMIN');
 INSERT INTO users(first_name, last_name, username, password, role) VALUES('Nuria', 'Corneio', 'nuria', '$2a$10$UVX62X4pPzpIBYaCC28EpuQMbVuRVaYyFStb2bhVrC3L.TNdsJhf.', 'USER');
 ````
+
+## Creando usuario reconocido en la arquitectura de Spring Security
+
+Anteriormente, creamos nuestra entity **User** para mapear los registros de usuarios con la base de datos y hacer
+operaciones con él, es decir, esta entity User representa la entidad de negocio que estemos trabajando. Por otro lado,
+Spring Security define un usuario propio, es decir, **un usuario que es reconocido dentro de su arquitectura** con el
+que se trabajará la autenticación y autorización en la aplicación. Entonces, crearemos este modelo de usuario propio de
+Spring Security al que le asociaremos nuestra entity User, de esta forma estamos separando las responsabilidades,
+por un lado, tenemos la Entity User propio del negocio, y, por otro lado, tenemos un usuario propio de Spring Security
+al que le llamaremos **SecurityUser**:
+
+````java
+public class SecurityUser implements UserDetails {
+
+    private final User user;
+
+    public SecurityUser(User user) {
+        this.user = user;
+    }
+
+    @Override
+    public Collection<? extends GrantedAuthority> getAuthorities() {
+        return List.of(new SimpleGrantedAuthority("ROLE_" + this.user.getRole().name()));
+    }
+
+    @Override
+    public String getPassword() {
+        return this.user.getPassword();
+    }
+
+    @Override
+    public String getUsername() {
+        return this.user.getUsername();
+    }
+
+    @Override
+    public boolean isAccountNonExpired() {
+        return true;
+    }
+
+    @Override
+    public boolean isAccountNonLocked() {
+        return true;
+    }
+
+    @Override
+    public boolean isCredentialsNonExpired() {
+        return true;
+    }
+
+    @Override
+    public boolean isEnabled() {
+        return true;
+    }
+}
+````
+
+**NOTA**
+> Nuestro modelo de usuario SecurityUser es un usuario reconocido dentro de la arquitectura de Spring Security y eso es
+> porque hace una implementación de la interfaz **UserDetails**.
+
