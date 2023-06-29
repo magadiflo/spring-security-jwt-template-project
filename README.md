@@ -675,3 +675,359 @@ WWW-Authenticate: Basic realm="Realm"
 Content-Length: 0
 Date: Wed, 28 Jun 2023 16:38:22 GMT
 ````
+
+## Creando el JwtTokenProvider
+
+El **JwtTokenProvider** será una clase de componente que utilizará la librería **auth0/java-jwt** para proveernos
+el **access token** y todo lo relacionado a él: validación, obtención de los claims, etc., es decir será como nuestra
+clase **Fachada** a partir del cual podemos obtener todo lo relacionado con el access token.
+
+````java
+
+@Component
+public class JwtTokenProvider {
+    private static final Logger LOG = LoggerFactory.getLogger(JwtTokenProvider.class);
+    private static final long EXPIRATION_TIME = 30 * 60 * 1000; //30min
+    private static final String AUTHORITIES = "authorities";
+    private static final String ISSUER = "Magadiflo Company";
+    private static final String AUTHORIZATION = "Authorization";
+    private static final String TOKEN_PREFIX = "Bearer ";
+    @Value("${jwt.secret.key}")
+    private String jwtSecretKey;
+    /* omitted code */
+}
+````
+
+**Donde**
+
+- **EXPIRATION_TIME**, define el tiempo de vida del access token, en nuestro caso es de 30 minutos, pero está expresado
+  en milisegundos.
+- **AUTHORITIES**, define la key para nuestro claims personalizado que guardará en el token los roles del usuario.
+- **ISSUER**, representa el nombre de quien está emitiendo el token, puede ser, por ejemplo el nombre de la compañía a
+  la que se le está desarrollando el software.
+- **AUTHORIZATION**, el nombre que debe venir en el header trayendo el token.
+- **TOKEN_PREFIX**, el header Authorization, debe traer como valor un token con el formato: **bearer [Aquí el token]**
+- **jwtSecretKey**, es una variable que obtiene su valor del **application.properties**. A través de la anotación
+  **@Value()** se indica la propiedad de la que obtendrá el valor. El valor representa la clave que se usará para poder
+  firmar y verificar el access token. En el siguiente fragmento se observa la propiedad en el application.properties:
+
+````properties
+jwt.secret.key=[a-zA-Z0-9._]^+$Guidelines.....
+````
+
+El método **createAccessToken()** permitirá crear un access token a partir de un **userDetails** usando para eso las
+constantes definidas anteriormente.
+
+````java
+
+@Component
+public class JwtTokenProvider {
+    /* omitted code */
+    public String createAccessToken(UserDetails userDetails) {
+        return JWT.create()
+                .withIssuer(ISSUER)
+                .withAudience("User", "Managament", "Portal")
+                .withIssuedAt(new Date())
+                .withSubject(userDetails.getUsername())
+                .withClaim(AUTHORITIES, this.authoritiesToCreateAccessToken(userDetails))
+                .withExpiresAt(Instant.now().plusMillis(EXPIRATION_TIME))
+                .sign(this.getAlgorithm());
+    }
+    /* omitted code */
+}
+````
+
+**Donde**
+
+- **withIssuer(ISSUER)**, indica el emisor del token.
+- **withAudience("User", "Managament", "Portal")**, cuál es la audiencia a la que va dirigida el token.
+- **withIssuedAt(new Date())**, fecha en la que se emite el token.
+- **withSubject(userDetails.getUsername())**, definimos un valor único, en nuestro caso definimos el username que es
+  único por cada usuario, podríamos haber usado el email, dni, etc., es importante que sea único, ya que lo usaremos más
+  adelante para poder identificarlo en la base de datos.
+- **withClaim(AUTHORITIES, this.authoritiesToCreateAccessToken(userDetails))**, como necesitamos almacenar nuestra lista
+  de authorities o en este caso roles, usamos un **claim personalizado**, es decir, nosotros mismos le definimos la
+  clave del claim y su valor, por suerte, tenemos el método **withClaim(...)** que recibe una clave y como valor una
+  **lista de String**, también podríamos haber usado el método **withArrayClaim(...)** que a diferencia del anterior
+  este recibe un arreglo de String.
+- **withExpiresAt(Instant.now().plusMillis(EXPIRATION_TIME))**, le asignamos el tiempo de validez al token a partir del
+  momento en que se crea.
+- **sign(this.getAlgorithm())**, agregamos el algoritmo para firmar el token.
+
+En el código anterior se hacen uso de dos métodos:
+
+**this.authoritiesToCreateAccessToken(userDetails)**, obtenemos una lista de roles a partir del userDetails:
+
+````java
+
+@Component
+public class JwtTokenProvider {
+    /* omitted code */
+    private List<String> authoritiesToCreateAccessToken(UserDetails userDetails) {
+        return userDetails.getAuthorities().stream()
+                .map(GrantedAuthority::getAuthority)
+                .toList();
+    }
+    /* omitted code */
+}
+````
+
+**this.getAlgorithm()**, definimos el algoritmo a usar incluyendo nuestra clave para poder firmar o verificar la firma
+del token.
+
+````java
+
+@Component
+public class JwtTokenProvider {
+    /* omitted code */
+    private Algorithm getAlgorithm() {
+        return Algorithm.HMAC512(this.jwtSecretKey.getBytes());
+    }
+    /* omitted code */
+}
+````
+
+El siguiente método **isAccessTokenValid()** es muy importante, ya que nos permitirá validar el token que le
+proporcionemos retornándonos un valor booleano. Para eso utilizamos un **try-catch**, de tal forma que si ocurre la
+excepción (el token no es válido) retornamos **false**, pero si no ocurre ninguna excepción retornamos **true**.
+
+````java
+
+@Component
+public class JwtTokenProvider {
+    /* omitted code */
+    public boolean isAccessTokenValid(String token) {
+        try {
+            this.jwtVerifier().verify(token);
+            return true;
+        } catch (AlgorithmMismatchException e) {
+            LOG.error("El algoritmo del encabezado del token no es igual al del JWTVerifier: {}", e.getMessage());
+        } catch (SignatureVerificationException e) {
+            LOG.error("La firma no es válida: {}", e.getMessage());
+        } catch (TokenExpiredException e) {
+            LOG.error("El token ha expirado: {}", e.getMessage());
+        } catch (MissingClaimException e) {
+            LOG.error("Claim faltante: {}", e.getMessage());
+        } catch (IncorrectClaimException e) {
+            LOG.error("Claim incorrecto: {}", e.getMessage());
+        } catch (JWTVerificationException e) {
+            LOG.error("Excepción general de verificación de un JWT: {}", e.getMessage());
+        }
+        return false;
+    }
+    /* omitted code */
+}
+````
+
+Ahora, quien lanza las excepciones si falla la validación, es el método **verify()**. Este método verify() se obtiene
+de un **JWTVerifier**. En nuestro caso, definimos un método que nos retorne el **JWTVerifier**, ya que lo usaremos en
+dos métodos distintos en este archivo, una, como pudimos ver, es en el método **isAccessTokenValid()** para verificar la
+validez del token y el otro método donde se usará es en el **decodedJWT()**.
+
+Como observamos, en el método **jwtVerifier()** configuramos el elemento necesario para que posteriormente se haga la
+validación del token. Este elemento es el algoritmo que usamos junto con nuestra clave. Como recordaremos, el método
+**getAlgorithm()** es el mismo que explicamos en el apartado superior.
+
+````java
+
+@Component
+public class JwtTokenProvider {
+    /* omitted code */
+    private JWTVerifier jwtVerifier() {
+        return JWT.require(this.getAlgorithm()).build();
+    }
+    /* omitted code */
+}
+````
+
+**Nota**
+> Dentro del método **jwtVerifier()** podemos utilizar una configuración adicional agregándole, por ejemplo, el emisor
+> (issuer) o el sujeto (subject) para que haga la verificación del token teniendo en cuenta también esas dos
+> configuraciones adicionales:
+>
+> JWT.require(algorithm)**.withIssuer("tu_emisor").withSubject("tu_sujeto")**.build();
+>
+> Para ejemplificar, podemos tomar como referencia el issuer, supongamos que creamos un token usando además del
+> algoritmo el issuer="company". Posteriormente, en la aplicación cambiamos el issuer="society". Ahora, cuando usemos
+> el token generado con issuer="company", la validación va a fallar porque ahora el issuer="society".
+>
+> ``ERROR com.magadiflo.jwt.template.project.app.security.utility.JwtTokenProvider -- Claim incorrecto: The Claim 'iss' value doesn't match the required issuer.``
+>
+> En nuestro caso, no usaremos dichas configuraciones adicionales, nos basta con usar
+> el ``JWT.require(this.getAlgorithm()).build();``
+
+Dijimos que, además del método **isAccessTokenValid()** usamos el método **jwtVerifier()** dentro del método
+**decodedJWT()**. Este método, internamente luego de la verificación correcta del token retorna el objeto del tipo
+**DecodedJWT** con el que podemos obtener los claims o distintos atributos asignados al crear el token.
+
+````java
+
+@Component
+public class JwtTokenProvider {
+    /* omitted code */
+    private DecodedJWT decodedJWT(String token) {
+        return this.jwtVerifier().verify(token);
+    }
+    /* omitted code */
+}
+````
+
+Con el método **decodedJWT()** del código anterior podemos recuperar el **Subject** a partir del token:
+
+````java
+
+@Component
+public class JwtTokenProvider {
+    /* omitted code */
+    public String getSubjectFromAccessToken(String token) {
+        return this.decodedJWT(token).getSubject();
+    }
+    /* omitted code */
+}
+````
+
+También, usando el método decodedJWT(), podemos recuperar de nuestro token, a partir de nuestro claim personalizado
+nuestra lista de authorities. El método siguiente, luego de recuperar los authorities lo transforma para retornar una
+lista de GrantedAuthority:
+
+````java
+
+@Component
+public class JwtTokenProvider {
+    /* omitted code */
+    public List<GrantedAuthority> getAuthoritiesFromAccessToken(String token) {
+        return this.decodedJWT(token).getClaim(AUTHORITIES).asList(String.class).stream()
+                .map(SimpleGrantedAuthority::new).collect(Collectors.toList());
+    }
+    /* omitted code */
+}
+````
+
+Finalmente, los siguientes tres métodos están relacionados con el token que se obtiene del **HttpServletRequest**. El
+primero recupera el token de la cabecera: "Authorization":
+
+````java
+
+@Component
+public class JwtTokenProvider {
+    private String authorizationHeader(HttpServletRequest request) {
+        return request.getHeader(AUTHORIZATION);
+    }
+}
+````
+
+El segundo, verifica si el token recuperado de la cabecera tiene el formato bearer token:
+
+````java
+
+@Component
+public class JwtTokenProvider {
+    public boolean isBearerToken(HttpServletRequest request) {
+        String bearerToken = this.authorizationHeader(request);
+        return bearerToken != null && bearerToken.startsWith(TOKEN_PREFIX) && bearerToken.split("\\.").length == 3;
+    }
+}
+````
+
+Y el tercero, retorna solo la cadena del token, sin ningún prefijo adicional:
+
+````java
+
+@Component
+public class JwtTokenProvider {
+    public String tokenFromRequest(HttpServletRequest request) {
+        String bearerToken = this.authorizationHeader(request);
+        return bearerToken.substring(TOKEN_PREFIX.length());
+    }
+}
+````
+
+Finalmente, la clase completa de **JwtTokenProvider** quedaría de esta manera:
+
+````java
+
+@Component
+public class JwtTokenProvider {
+    private static final Logger LOG = LoggerFactory.getLogger(JwtTokenProvider.class);
+    private static final long EXPIRATION_TIME = 30 * 60 * 1000; //30min
+    private static final String AUTHORITIES = "authorities";
+    private static final String ISSUER = "System";
+    private static final String AUTHORIZATION = "Authorization";
+    private static final String TOKEN_PREFIX = "Bearer ";
+    @Value("${jwt.secret.key}")
+    private String jwtSecretKey;
+
+    public String createAccessToken(UserDetails userDetails) {
+        return JWT.create()
+                .withIssuer(ISSUER)
+                .withAudience("User", "Managament", "Portal")
+                .withIssuedAt(new Date())
+                .withSubject(userDetails.getUsername())
+                .withClaim(AUTHORITIES, this.authoritiesToCreateAccessToken(userDetails))
+                .withExpiresAt(Instant.now().plusMillis(EXPIRATION_TIME))
+                .sign(this.getAlgorithm());
+    }
+
+    public boolean isAccessTokenValid(String token) {
+        try {
+            this.jwtVerifier().verify(token);
+            return true;
+        } catch (AlgorithmMismatchException e) {
+            LOG.error("El algoritmo del encabezado del token no es igual al del JWTVerifier: {}", e.getMessage());
+        } catch (SignatureVerificationException e) {
+            LOG.error("La firma no es válida: {}", e.getMessage());
+        } catch (TokenExpiredException e) {
+            LOG.error("El token ha expirado: {}", e.getMessage());
+        } catch (MissingClaimException e) {
+            LOG.error("Claim faltante: {}", e.getMessage());
+        } catch (IncorrectClaimException e) {
+            LOG.error("Claim incorrecto: {}", e.getMessage());
+        } catch (JWTVerificationException e) {
+            LOG.error("Excepción general de verificación de un JWT: {}", e.getMessage());
+        }
+        return false;
+    }
+
+    public String getSubjectFromAccessToken(String token) {
+        return this.decodedJWT(token).getSubject();
+    }
+
+    public List<GrantedAuthority> getAuthoritiesFromAccessToken(String token) {
+        return this.decodedJWT(token).getClaim(AUTHORITIES).asList(String.class).stream()
+                .map(SimpleGrantedAuthority::new).collect(Collectors.toList());
+    }
+
+    public boolean isBearerToken(HttpServletRequest request) {
+        String bearerToken = this.authorizationHeader(request);
+        return bearerToken != null && bearerToken.startsWith(TOKEN_PREFIX) && bearerToken.split("\\.").length == 3;
+    }
+
+    public String tokenFromRequest(HttpServletRequest request) {
+        String bearerToken = this.authorizationHeader(request);
+        return bearerToken.substring(TOKEN_PREFIX.length());
+    }
+
+    private String authorizationHeader(HttpServletRequest request) {
+        return request.getHeader(AUTHORIZATION);
+    }
+
+    private JWTVerifier jwtVerifier() {
+        return JWT.require(this.getAlgorithm()).build();
+    }
+
+    private DecodedJWT decodedJWT(String token) {
+        return this.jwtVerifier().verify(token);
+    }
+
+    private Algorithm getAlgorithm() {
+        return Algorithm.HMAC512(this.jwtSecretKey.getBytes());
+    }
+
+    private List<String> authoritiesToCreateAccessToken(UserDetails userDetails) {
+        return userDetails.getAuthorities().stream()
+                .map(GrantedAuthority::getAuthority)
+                .toList();
+    }
+}
+
+````
