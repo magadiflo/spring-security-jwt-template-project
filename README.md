@@ -1407,3 +1407,50 @@ haber realizado el login con éxito y haber obtenido un **accessToken**, usaremo
 cada petición cuando quisiéramos acceder a algún recurso protegido, es en ese instante, que se utilizará una
 implementación del **AuthenticationFilter** (le llamaremos **JwtAuthenticationFilter**) quien interceptará los
 **requests**, obtendrá el **accessToken** y hará todo el proceso de autenticación que vemos en la imagen anterior.
+
+## Probando la funcionalidad de iniciar sesión
+
+**[200 OK]** Hacemos un **login exitoso** con el usuario martin, vemos que **nos retorna el accessToken** correctamente:
+
+````bash
+curl -i -X POST -H "Content-Type: application/json" -d "{\"username\": \"martin\", \"password\": \"12345\"}" http://localhost:8080/api/v1/auth/login
+HTTP/1.1 200
+Content-Type: application/json
+...
+
+{ 
+  "username":"martin",
+  "accessToken":"eyJhbGciOiJIUzUxMiIsInR5cCI6IkpXVCJ9...",
+  "refreshToken":"--no-disponible-aún--"
+}
+````
+
+**[401Unauthorized]** Hacemos login con un **usuario correcto** pero una **contraseña incorrecta:**
+
+````bash
+curl -i -X POST -H "Content-Type: application/json" -d "{\"username\": \"martin\", \"password\": \"000000\"}" http://localhost:8080/api/v1/auth/login
+HTTP/1.1 401
+Set-Cookie: JSESSIONID=BB4C3A1A925067A47102E6DD280E9F2F
+WWW-Authenticate: Basic realm="Realm"
+...
+````
+
+**[401Unauthorized]** Hacemos login con un **usuario incorrecto:**
+
+````bash
+curl -i -X POST -H "Content-Type: application/json" -d "{\"username\": \"hacker\", \"password\": \"000000\"}" http://localhost:8080/api/v1/auth/login
+HTTP/1.1 401
+Set-Cookie: JSESSIONID=A9F44246F9E1E6EEF9EA58DF56818632; Path=/; HttpOnly
+WWW-Authenticate: Basic realm="Realm"
+...
+````
+
+**[401Unauthorized]** Hacemos login **sin enviarle credenciales:**
+
+````bash
+curl -i -X POST http://localhost:8080/api/v1/auth/login
+HTTP/1.1 401
+Set-Cookie: JSESSIONID=29E6B2ECB66C44FD1F29DECF2997721E; Path=/; HttpOnly
+WWW-Authenticate: Basic realm="Realm"
+...
+````
