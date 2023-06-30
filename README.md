@@ -1031,3 +1031,230 @@ public class JwtTokenProvider {
 }
 
 ````
+
+---
+
+## Anulando la configuración de autorización del endpoint
+
+Revisando la documentación oficial, existe un ejemplo donde nos muestran explícitamente la configuración de Spring
+Security con los valores predeterminados, es decir, apenas agregamos la dependencia de Spring Security al proyecto, se
+aplica una configuración predeterminada, dicha configuración es tal cual se muestra a continuación
+([Ver el ejemplo en el repositorio oficial](https://github.com/spring-projects/spring-security-samples/blob/main/servlet/spring-boot/java/hello-security-explicit/src/main/java/example/SecurityConfiguration.java)):
+
+````java
+
+@Configuration
+@EnableWebSecurity
+public class SecurityConfiguration {
+
+    @Bean
+    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+        // @formatter:off
+		http
+				.authorizeHttpRequests((authorize) -> authorize
+						.anyRequest().authenticated()
+				)
+				.httpBasic(withDefaults())
+				.formLogin(withDefaults());
+		// @formatter:on
+        return http.build();
+    }
+
+    // @formatter:off
+	@Bean
+	public InMemoryUserDetailsManager userDetailsService() {
+		UserDetails user = User.withDefaultPasswordEncoder()
+				.username("user")
+				.password("password")
+				.roles("USER")
+				.build();
+		return new InMemoryUserDetailsManager(user);
+	}
+	// @formatter:on
+
+}
+````
+
+Como observamos en el código anterior, se muestra la habilitación del tipo de autenticación HTTP Basic Auth y el
+Form Login Authentication, además de que para poder acceder a cualquier endpoint el usuario tiene que autenticarse.
+Finalmente, observamos que el usuario por defecto es **user** y la contraseña se genera de manera aleatoria, que es la
+contraseña que se muestra por defecto en consola.
+
+Es importante haber mostrado la configuración por defecto que establece Spring Security, ya que **ahora tendremos
+que anularlo para poder crear nuestra propia configuración.** Además, tal como se vio en el libro de **Spring Security
+In Action 2020 [Pág. 48]** también creamos nuestra propia configuración de Spring Security, aunque en el libro se hace
+uso de una versión antigua de Spring Security ,se usa la clase abstracta **WebSecurityConfigurerAdapter** que para
+nuestro caso ya está deprecado, pero la idea es la misma, crear una clase de configuración para sobreescribir los
+valores predeterminados de spring security.
+
+Nuestra configuración que anula la configuración por defecto, será por el momento, el siguiente:
+
+````java
+
+@EnableWebSecurity(debug = true)
+@Configuration
+public class ApplicationSecurityConfig {
+    @Bean
+    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+        http
+                .csrf(AbstractHttpConfigurer::disable)
+                .authorizeHttpRequests(authorize -> {
+                    authorize.requestMatchers("/api/v1/auth/**").permitAll();
+                    authorize.anyRequest().authenticated();
+                })
+                .httpBasic(Customizer.withDefaults());
+        return http.build();
+    }
+}
+````
+
+**DONDE**
+
+- **@EnableWebSecurity(debug = true)**, agregue esta anotación a una clase @Configuration para tener la configuración de
+  Spring Security definida en cualquier WebSecurityConfigurer o, más probablemente, exponiendo un bean
+  SecurityFilterChain. **¿Necesito agregarlo a la clase de configuración?** Si no está utilizando spring-boot, sino solo
+  un proyecto de spring puro, definitivamente necesita agregar @EnableWebSecurity para habilitar spring-security. Pero
+  si está utilizando spring-boot 2.0 +, no necesita agregarlo usted mismo porque **la configuración automática de
+  spring-boot lo hará automáticamente si olvida hacerlo.** En mi caso, lo dejaré agregado, de todos modos requiero
+  mientras voy desarrollando que esté habilitado el ``debug=true``. Con el **debug=true** se puede **observar en consola
+  todos los filtros involucrados en la solicitud actual**. Por ejemplo, haciendo una petición a nuestro endpoint de
+  **/api/v1/auth/login** y con la configuración que viene por defecto en Spring Security, vemos en consola la lista de
+  los filtros involucrados:
+
+  ````
+  Security filter chain: [
+    DisableEncodeUrlFilter
+    WebAsyncManagerIntegrationFilter
+    SecurityContextHolderFilter
+    HeaderWriterFilter
+    CsrfFilter
+    LogoutFilter
+    UsernamePasswordAuthenticationFilter
+    DefaultLoginPageGeneratingFilter
+    DefaultLogoutPageGeneratingFilter
+    BasicAuthenticationFilter
+    RequestCacheAwareFilter
+    SecurityContextHolderAwareRequestFilter
+    AnonymousAuthenticationFilter
+    ExceptionTranslationFilter
+    AuthorizationFilter
+  ]
+  ````
+
+  Ahora, hacemos la misma petición usando nuestra propia configuración:
+  ````
+  Security filter chain: [
+    DisableEncodeUrlFilter
+    WebAsyncManagerIntegrationFilter
+    SecurityContextHolderFilter
+    HeaderWriterFilter
+    LogoutFilter
+    BasicAuthenticationFilter
+    RequestCacheAwareFilter
+    SecurityContextHolderAwareRequestFilter
+    AnonymousAuthenticationFilter
+    ExceptionTranslationFilter
+    AuthorizationFilter
+  ]
+  ````
+  Vemos claramente que con nuestra configuración ya no aparecen los filtros:
+  ``CsrfFilter, UsernamePasswordAuthenticationFilter, DefaultLoginPageGeneratingFilter,
+  DefaultLogoutPageGeneratingFilter`` y de entre los que quedan hay dos muy interesantes: ``BasicAuthenticationFilter
+  y el AuthorizationFilter``. Esta lista puede diferir según la configuración de seguridad y la ruta de acceso de la
+  solicitud actual. Tenga en cuenta que el orden de los filtros importa, ya que se llaman en la secuencia en que se
+  registran con el contenedor de servlets.
+
+
+- **csrf(AbstractHttpConfigurer::disable)**, deshabilitamos el csrf, ya que nuestra aplicación no es una aplicación que
+  renderiza el frontend (thymeleaf, jsp) y con el que se trabaja en formularios, sino, es una aplicación REST, por lo
+  tanto al deshabilitar, nos va a permitir hacer peticiones POST, PUT, DELETE, caso contrario no nos permitirá.
+
+
+- **authorize.requestMatchers("/api/v1/auth/\**").permitAll()**, permitimos todas las llamadas al endpoint .../auth,
+  eso incluirá el login, y más adelante el register, etc. sin la necesidad de enviar credenciales.
+
+
+- **authorize.anyRequest().authenticated()**, cualquier otra llamada que no se haya especificado previamente tendrá que
+  autenticarse primero.
+
+
+- **httpBasic(Customizer.withDefaults())**, dejamos habilitado el **BasicAuthenticationFilter**, mientras que el Form
+  Login Authentication (UsernamePasswordAuthenticationFilter) que venía por defecto ya no está habilitado, eso significa
+  que si ahora ingresamos por el navegador veremos que ya no nos muestra un login, sino más bien un popup de javascript
+  para ingresar el username y password.
+
+## Creando los DTO para enviar y recibir datos entre el cliente y servidor
+
+````java
+public record LoginRequestDTO(String username, String password) {
+}
+````
+
+````java
+public record LoginResponseDTO(String username, String accessToken, String refreshToken) {
+}
+````
+
+## Creando controlador AuthController
+
+Este controlador será el que permita hacer el **login**, **register** y **refreshToken** de los usuarios.
+
+````java
+
+@RestController
+@RequestMapping(path = "/api/v1/auth")
+public class AuthController {
+    private final AuthService authService;
+
+    public AuthController(AuthService authService) {
+        this.authService = authService;
+    }
+
+    @PostMapping(path = "/login")
+    public ResponseEntity<LoginResponseDTO> login(@RequestBody LoginRequestDTO loginRequestDTO) {
+        return ResponseEntity.ok(this.authService.login(loginRequestDTO));
+    }
+}
+````
+
+## Creando el servicio AuthService
+
+Nuestra clase de servicio implementará la lógica para hacer el **login, register y refreshToken**.
+
+````java
+
+@Service
+public class AuthService {
+    private static final Logger LOG = LoggerFactory.getLogger(AuthService.class);
+
+    public LoginResponseDTO login(LoginRequestDTO loginRequestDTO) {
+        LOG.info("Logueando al usuario: {}", loginRequestDTO);
+
+        // TODO authenticar al usuario
+
+        return new LoginResponseDTO("test", "12345", "abcd");
+    }
+
+}
+````
+
+## Testeando desde "Anulando la configuración de autorización del endpoint"
+
+Probamos el endpoint **/login** del controlador **AuthController** con datos que no están en la BD, solo estamos
+probando para ver cómo recibe los datos y como nos devuelve desde el servicio.
+
+````bash
+curl -i -X POST -H "Content-Type: application/json" -d "{\"username\": \"martincillo\", \"password\": \"45725876\"}" http://localhost:8080/api/v1/auth/login
+HTTP/1.1 200
+X-Content-Type-Options: nosniff
+X-XSS-Protection: 0
+Cache-Control: no-cache, no-store, max-age=0, must-revalidate
+Pragma: no-cache
+Expires: 0
+X-Frame-Options: DENY
+Content-Type: application/json
+Transfer-Encoding: chunked
+Date: Fri, 30 Jun 2023 03:37:22 GMT
+
+{"username":"test","accessToken":"12345","refreshToken":"abcd"}
+````
