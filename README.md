@@ -1258,3 +1258,152 @@ Date: Fri, 30 Jun 2023 03:37:22 GMT
 
 {"username":"test","accessToken":"12345","refreshToken":"abcd"}
 ````
+
+---
+
+## Configuraciones finales para iniciar sesión con usuarios
+
+Si revisamos la imagen donde mostramos los componentes que interactúan en el flujo de autenticación en Spring Security,
+veremos que el segundo componente es el **AuthenticationManager**, este componente tiene la responsabilidad del proceso
+de autenticación. Para realizar este proceso, el AuthenticationManager delega a uno de los proveedores de autenticación
+disponibles realizar la lógica de autenticación. El **AuthenticationProvider** usa el **UserDetailsService** y el
+**PasswordEncoder** que definimos ya en capítulos anteriores, para efectuar la lógica de autenticación. Por esa razón,
+es importante definir un **bean** del **AuthenticationManager** pues, será utilizado para inyectarlo, por ejemplo en la
+clase de servicio **AuthService** y desde allí empezar a tener la responsabilidad del proceso de autenticación.
+
+````java
+
+@Configuration
+public class SecurityConfig {
+    /* omitted password encoder */
+
+    @Bean
+    public AuthenticationManager authenticationManager(AuthenticationConfiguration config) throws Exception {
+        return config.getAuthenticationManager();
+    }
+}
+````
+
+Ahora, usaremos el bean expuesto del **AuthenticationManager** en la clase **AuthService** donde implementaremos el
+login con los datos que el usuario envía en el **LoginRequestDTO**.
+
+````java
+
+@Service
+public class AuthService {
+    /* omitted code */
+    private final JwtTokenProvider jwtTokenProvider;
+    private final AuthenticationManager authenticationManager;
+    private final UserRepository userRepository;
+
+    /* omitted constructor */
+
+    public LoginResponseDTO login(LoginRequestDTO loginRequestDTO) {
+        Authentication authentication = this.authenticate(loginRequestDTO.username(), loginRequestDTO.password());
+
+        // Si hasta este punto llega y no lanzó ningún error, significa que sí se autenticó correctamente
+        return this.loginResponse(authentication.getName());
+    }
+
+    private Authentication authenticate(String username, String password) {
+        var authenticationToken = new UsernamePasswordAuthenticationToken(username, password);
+        return this.authenticationManager.authenticate(authenticationToken);
+    }
+
+    @Transactional(readOnly = true)
+    private LoginResponseDTO loginResponse(String username) {
+        Optional<User> userOptional = this.userRepository.findUserByUsername(username);
+        UserDetails userDetails = new SecurityUser(userOptional.orElseThrow());
+        String accessToken = this.jwtTokenProvider.createAccessToken(userDetails);
+        LOG.info("Usuario logueado: {}", username);
+        LOG.info("AccessToken: {}", accessToken);
+        return new LoginResponseDTO(username, accessToken, "--no-disponible-aún--");
+    }
+}
+````
+
+Primero explicaré los métodos privados, los separé para que sea más ordenado.
+
+El método privado **authenticate(...)** tiene como parámetros un usuario y una contraseña que serán usados para crear un
+nuevo objeto del tipo **UsernamePasswordAuthenticationToken(...)** que es una implementación de la interfaz
+**Authentication**, de esta implementación usamos el **constructor de dos parámetros**, ya que **existe también un
+constructor de 3 parámetros**, pero, **¿cuál es la diferencia?**, usamos el constructor con
+dos parámetros cuando construimos inicialmente el objeto de autenticación **y aún no está autenticado**, es decir, si
+ingresamos al constructor de 2 parámetros veremos que tenemos un **setAuthenticated(false)** indicándonos lo ya
+mencionado.
+
+**NOTA**
+> Recordar que el **AuthenticationProvider** es el que implementa la lógica de autenticación haciendo uso del
+> UserDetailsService y PasswordEncoder. Ahora, cuando el **AuthenticationProvider** autentica la solicitud, crea una
+> instancia de autenticación utilizando, ¡ahora sí!, el constructor con 3 parámetros
+> del UsernamePasswordAuthenticationToken, lo que crea un objeto autenticado. Este detalle es importante porque el
+> método authenticate() del **AuthenticationProvider** tiene que devolver una instancia autenticada. Si revisamos el
+> constructor con 3 parámetros veremos que tenemos un **super.setAuthenticated(true);** indicándonos
+> lo mencionado.
+>
+> El **UsernamePasswordAuthenticationToken** es una implementación de la interfaz **Authentication** y representa una
+> solicitud de autenticación estándar con username y password.
+
+Ahora, dentro el método **authenticate(...)** se hace uso del **AuthenticationManager**, el cual inyectamos vía
+constructor de la clase. Este **authenticationManager** hace uso de su método **authenticate(...)** al que le pasamos
+la implementación **UsernamePasswordAuthenticationToken**. Este método intenta autenticar al objeto de autenticación
+pasada, devolviendo un objeto **Authentication** completo (incluidos los authorities) si la autenticación tiene éxito.
+
+**NOTA**
+
+> Un AuthenticationManager debe cumplir el siguiente contrato con respecto a las excepciones:
+>
+> - Se debe lanzar un **DisabledException** si una cuenta está deshabilitada y el AuthenticationManager puede probar
+    este estado.
+> - Se debe lanzar un **LockedException** si una cuenta está bloqueada y AuthenticationManager puede probar el bloqueo
+    de la cuenta.
+> - Se debe lanzar un **BadCredentialsException** si se presentan credenciales incorrectas. Si bien las excepciones
+    anteriores son opcionales, un AuthenticationManager siempre debe probar las credenciales.
+
+
+En pocas palabras, si la autenticación falla lanzará la excepción **AuthenticationException**, por lo tanto, el proceso
+de autenticación finaliza con la excepción.
+
+El método privado **loginResponse(username)**, recupera información de un User en función de su username, crea un
+UserDetails y a partir de él genera un **accessToken** para posteriormente devolverlos al cliente.
+
+Ahora sí, nuestro método público **login()**. Este método recibe el username y password del usuario, luego usa el
+método privado **authenticate()** para autenticar dichas credenciales. ``Si hasta ese punto el método privado
+authenticate() no lanza ninguna excepción, significa que se autenticó correctamente``. Finalmente, como respuesta el
+método **login()** responde con el objeto LoginResponseDTO poblado (con el username, accessToken, refreshToken).
+
+### Clases que interactúan en el proceso de autenticación del login
+
+Recordar que en nuestro **AuthService** inyectamos el **AuthenticationManager** para realizar el proceso de
+autenticación con las credenciales enviadas por el cliente. Lo primero que sucede es que una implementación del
+**AuthenticationManager**, en este caso el **ProviderManager** es el que recibe el objeto
+**UsernamePasswordAuthenticationToken** en su método **authenticate(..)**. Recordemos que el **AuthenticationManager**
+delega al **AuthenticationProvider** realizar la lógica de autenticación, en este caso, la implementación del
+**AuthenticationManager**, o sea el **ProviderManager** delega realizar esa lógica de autenticación a una implementación
+del authenticationProvider, en este caso será el **DaoAuthenticationProvider**.
+
+**NOTA**
+
+> La configuración predeterminada en Spring Boot establece el **DaoAuthenticationProvider como el proveedor de
+> autenticación principal.** Sin embargo, es posible personalizar esta configuración y utilizar diferentes
+> implementaciones del AuthenticationProvider según tus necesidades específicas.
+
+Para finalizar, un último comentario de lo visto hasta ahora, pero antes, recordemos el flujo de los componentes
+principales que interactúan en el proceso de autenticación de Spring Security:
+
+![Main-components-authentication-spring-security](./assets/01.Main-components-authentication-spring-security.png)
+
+Como vemos la imagen anterior, el proceso de autenticación arranca desde el **AuthenticationFilter**, pero en nuestro
+proceso de hacer login, en este caso en particular, nos fuimos directamente al **AuthenticationManager**. Recordemos que
+creamos el endpoint ``/api/v1/auth/login`` para que sea accedido con total libertad por cualquier usuario. Por lo tanto,
+cuando ingresamos a ese endpoint, ya estamos dentro de la aplicación, y a partir de aquí lo que queremos hacer es
+seguir el mismo flujo que seguiría un **AuthenticationFilter** que es llamar al **AuthenticationManager**, luego este al
+**AuthenticationProvider**, etc... con la finalidad de autenticar al usuario con el username y password enviado a
+ese endpoint y si el **authenticationManager.authenticate(...)** no lanza ninguna excepción retornamos al cliente
+un **accessToken** que usará en los request a otros recursos.
+
+**¿Y en nuestro caso, cuándo arrancaremos el proceso de autenticación desde el AuthenticationFilter?** Pues, luego de
+haber realizado el login con éxito y haber obtenido un **accessToken**, usaremos ese **accessToken** para enviarlo en
+cada petición cuando quisiéramos acceder a algún recurso protegido, es en ese instante, que se utilizará una
+implementación del **AuthenticationFilter** (le llamaremos **JwtAuthenticationFilter**) quien interceptará los
+**requests**, obtendrá el **accessToken** y hará todo el proceso de autenticación que vemos en la imagen anterior.
