@@ -1725,3 +1725,143 @@ public class ApplicationSecurityConfig {
     }
 }
 ````
+
+---
+
+## Configurando CORS
+
+Para tener un mejor panorama de este tema, en el libro de **Spring Security In Action 2020**
+[**Capítulo 10 applying csrf protection and
+cors**](https://github.com/magadiflo/spring-security-in-action-2020/blob/main/10.applying_csrf_protection_and_cors.md)
+se habla con mayor detalle.
+
+El uso **compartido de recursos de origen cruzado (cross-origin resource sharing - CORS)** se refiere a la situación en
+la que una aplicación web alojada en un dominio específico intenta acceder al contenido de otro dominio. **De forma
+predeterminada, el navegador no permite que esto suceda**. La configuración CORS le permite que una parte de sus
+recursos se llame desde un dominio diferente en una aplicación web que se ejecuta en el navegador.
+
+Por ejemplo, supongamos que nuestro backend está ejecutándose en el dominio **api-jwt.com**, mientras que tenemos
+desarrollado una aplicación cliente que se está ejecutando en el dominio **angular-client.com**, entonces, con la
+habilitación de cors le estamos diciendo a nuestro backend que permita la llamada del dominio **angular-client.com**,
+solo llamadas de ese dominio, las demás serán rechazadas.
+
+Como primer ejemplo, veamos qué pasa si intentamos llamar desde una aplicación de Angular que está en el puerto 4200,
+a nuestra aplicación de Spring Boot que está en el puerto 8080, de por sí, esto se consideraría como
+**dominios distintos**:
+
+````
+Access to XMLHttpRequest at 'http://localhost:8080/api/v1/products' from origin 'http://localhost:4200' 
+has been blocked by CORS policy: 
+Response to preflight request doesn't pass access control check: 
+No 'Access-Control-Allow-Origin' header is present on the requested resource.
+
+GET http://localhost:8080/api/v1/products net::ERR_FAILED
+````
+
+Cuando la aplicación cliente realiza la solicitud, espera que la respuesta tenga un encabezado
+**Access-Control-Allow-Origin** que contenga los orígenes aceptados por el servidor. Si esto no sucede, como en el caso
+del comportamiento predeterminado de Spring Security, **el navegador no aceptará la respuesta.**
+
+Ahora, qué pasa si agregamos la siguiente configuración para **CORS** en nuestra aplicación backend.
+
+1. Habilitamos **CORS** en el archivo principal de configuración de Spring Security.
+2. Creamos un **@Bean** exponiendo las configuraciones del cors. Si optamos por esta forma, como mínimo debe
+   configurarse los **orígenes permitidos y los métodos permitidos**.
+
+````java
+
+@EnableWebSecurity(debug = true)
+@Configuration
+public class ApplicationSecurityConfig {
+    /* omitted code */
+
+    @Bean
+    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+        http
+                .cors(Customizer.withDefaults());
+        /* omitted code */
+        return http.build();
+    }
+}
+````
+
+Como segundo paso, exponemos un bean con las configuraciones del cors. En este caso estamos proporcionando un bean que
+expone un **CorsFilter**. En otras configuraciones que he revisado, el bean que se expone es una implementación del
+**CorsConfigurationSource** es decir el **UrlBasedCorsConfigurationSource** que usa el objeto **CorsConfiguration**.
+En nuestro caso usamos el objeto del **UrlBasedCorsConfigurationSource**, para crear un nuevo **CorsFilter pasándole
+el objeto por el constructor**. Cualquiera de las dos formas es válida según el comentario del código fuente:
+
+> **Agrega un CorsFilter** para ser utilizado. **Si se proporciona un bean con el nombre de corsFilter**, se **utiliza
+> ese CorsFilter.** De lo contrario, si se define corsConfigurationSource, entonces se usa CorsConfiguration.
+> De lo contrario, si Spring MVC está en el classpath, se usa un HandlerMappingIntrospector.
+
+````java
+
+@Configuration
+public class SecurityConfig {
+    /* omitted code */
+
+    @Bean
+    public CorsFilter corsFilter() {
+        CorsConfiguration configuration = new CorsConfiguration();
+        configuration.setAllowCredentials(true);
+        configuration.setAllowedOrigins(Collections.singletonList("http://localhost:4200"));
+        configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS"));
+        configuration.setAllowedHeaders(Arrays.asList("Origin", "Content-Type", "Accept", "Authorization",
+                "Access-Control-Allow-Origin", "Access-Control-Request-Method", "Access-Control-Request-Headers",
+                "X-Requested-With"));
+        configuration.setExposedHeaders(Arrays.asList("Origin", "Content-Type", "Accept", "Authorization",
+                "Access-Control-Allow-Origin", "Access-Control-Allow-Credentials"));
+
+        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+        source.registerCorsConfiguration("/**", configuration); // "/**", representa todas las rutas del backend
+
+        return new CorsFilter(source);
+    }
+}
+````
+
+**NOTA**
+
+> Existen otras formas de configurar CORS en nuestra aplicación de Spring Boot, podemos agregar la anotación
+> **@CrossOrigin("http://localhost:4200")** directamente sobre el método que define el endpoint y configurarlo
+> utilizando los orígenes y métodos permitidos. Esta anotación **@CrossOrigin("http://localhost:4200")** también puede
+> ser colocado a nivel del controlador para que aplique a todos los endpoints del mismo.
+
+
+Para finalizar el tema de cors, cuando habilitamos la configuración de cors, automáticamente se agrega un nuevo filtro
+**CorsFilter** a la cadena de filtros de seguridad de Spring Security.
+
+````
+Security filter chain: [
+  DisableEncodeUrlFilter
+  WebAsyncManagerIntegrationFilter
+  SecurityContextHolderFilter
+  HeaderWriterFilter
+  CorsFilter                  <--------------
+  LogoutFilter
+  JwtAuthenticationFilter
+  RequestCacheAwareFilter
+  SecurityContextHolderAwareRequestFilter
+  AnonymousAuthenticationFilter
+  ExceptionTranslationFilter
+  AuthorizationFilter
+]
+````
+
+Volvemos a realizar la solicitud dede nuestra aplicación de Angular (http://localhost:4200/home) hacia nuestra
+aplicación de Spring Boot (http://localhost:8080/api/v1/products)
+
+````
+(4) [{…}, {…}, {…}, {…}]
+0: {id: 1, name: 'Pc gamer', price: 3500}
+1: {id: 2, name: 'Teclado inalámbrico', price: 150.8}
+2: {id: 3, name: 'Mouse inalámbrico', price: 99.9}
+3: {id: 4, name: 'Celular Samsung A7', price: 5900}
+length: 4
+````
+
+Como vemos, ahora ya nos muestra la respuesta correcta, eso significa que nuestra configuración de **CORS** habilitado
+y configurado en nuestro backend está funcionando, obviamente en la petición hemos tenido que mandarle un accessToken,
+ya que hasta este punto tenemos securizados los endpoints.
+
