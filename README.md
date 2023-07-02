@@ -1454,3 +1454,274 @@ Set-Cookie: JSESSIONID=29E6B2ECB66C44FD1F29DECF2997721E; Path=/; HttpOnly
 WWW-Authenticate: Basic realm="Realm"
 ...
 ````
+
+---
+
+## Creando filtro de autenticación para verificación del access token
+
+Crearemos un filtro personalizado llamado **JwtAuthenticationFilter** para procesar el access token que envía el
+cliente. Si recordamos los componentes que intervienen en el flujo de autenticación en Spring Security inician con el
+**AuthenticationFilter**, luego pasa al **AuthenticationManager** y así sucesivamente hasta terminar de registrar al
+usuario en el **Security Context** siempre y cuando la autenticación haya sido exitosa.
+
+En nuestro caso, utilizaremos este filtro personalizado **JwtAuthenticationFilter** para realizar, casi de la misma
+forma, el proceso de autenticación, y digo **casi de la misma forma**, ya que aquí estaremos trabajando con un
+**accessToken**, eso significa que solo necesitamos verificar la validez del token y obtener el usuario y sus
+authorities del mismo token, así ya no necesitamos ir a la base de datos a recuperar detalles del usuario, porque todo
+lo haremos con el token recibido.
+
+Una vez que hayamos validado el token y hayamos obtenido el usuario y sus authorities, crearemos un objeto de
+autenticación del tipo **UsernamePasswordAuthenticationToken** pero el del **constructor de 3 parámetros**. Si volvemos
+al flujo de autenticación que define Spring Security, su componente **AuthenticationProvider** cuando va a autenticar
+una solicitud, crea una instancia de autenticación utilizando el constructor con 3 parámetros del
+**UsernamePasswordAuthenticationToken**, lo que crea un objeto autenticado. Ahora, volviendo a nuestro caso particular,
+luego de haber validado el token y obtenido el username y authorities, necesitamos crear la misma instancia de
+autenticación con los 3 parámetros, ahora si revisamos dicho constructor veremos que tiene un
+**super.setAuthenticated(true)**.
+
+Luego de tener nuestra instancia autenticada, debemos registrarlo en el **Security Context**, tal cual lo hace el
+AuthenticationFilter una vez que ha verificado con éxito todo el proceso de autenticación.
+
+**¿Por qué debemos registrarlo en el Security Context?**, porque después de haber realizado dicho registro, al finalizar
+los demás filtros, se delega la solicitud al **Authorization Filter** quien **usará los datos registrados en el Security
+Context** para decidir **si autorizar el acceso** del usuario al recurso que ha solicitado **o denegar su acceso.**
+
+````java
+
+@Component
+public class JwtAuthenticationFilter extends OncePerRequestFilter {
+    private static final Logger LOG = LoggerFactory.getLogger(JwtAuthenticationFilter.class);
+    private final JwtTokenProvider jwtTokenProvider;
+
+    public JwtAuthenticationFilter(JwtTokenProvider jwtTokenProvider) {
+        this.jwtTokenProvider = jwtTokenProvider;
+    }
+
+    @Override
+    protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
+            throws ServletException, IOException {
+        if (!this.jwtTokenProvider.isBearerToken(request)) {
+            LOG.error("No procesó la solicitud de autenticación porque no pudo encontrar el formato bearer token en " +
+                    "el encabezado de autorización");
+            filterChain.doFilter(request, response);
+            return;
+        }
+
+        String token = this.jwtTokenProvider.tokenFromRequest(request);
+
+        if (!this.jwtTokenProvider.isAccessTokenValid(token)) {
+            LOG.error("El access token proporcionado no pasó la validación de la librería auth0/java-jwt");
+            filterChain.doFilter(request, response);
+            return;
+        }
+
+        // Hasta este punto se verificó la validez del access token, por lo tanto, inicia el proceso de autenticación
+        // y registro de los datos en el Security Context
+
+        // Recuperamos el usuario y los authorities desde el mismo token
+        String username = this.jwtTokenProvider.getSubjectFromAccessToken(token);
+        List<GrantedAuthority> authorities = this.jwtTokenProvider.getAuthoritiesFromAccessToken(token);
+
+        // Creamos una instancia autenticada con el constructor de 3 parámetros. El segundo parámetro que es la contraseña
+        // ya no va, porque ya verificamos que es un usuario válido y para eso usamos la verificación del accessToken
+        var authentication = new UsernamePasswordAuthenticationToken(username, null, authorities);
+
+        // Establecemos detalles adicionales de la autenticación con los datos del request: como dirección ip 
+        // del cliente, detalles del agente de usuario, etc. y hacerla accesible durante la ejecución de la 
+        // lógica de seguridad de Spring
+        authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
+
+        // Actualizamos el contexto de seguridad
+        SecurityContextHolder.getContext().setAuthentication(authentication);
+
+        // Dejamos que pase la llamada al siguiente filtro en la cadena de filtros
+        filterChain.doFilter(request, response);
+    }
+}
+````
+
+## Creando una implementación del AuthenticationEntryPoint
+
+El método de nuestra implementación se ejecutará cada vez que ocurra un **AuthenticationException**, es decir, cuando un
+cliente está intentando acceder a un recurso protegido, la aplicación con esta excepción le indicará que **primero
+necesita autenticarse** lanzándole un **401 Unauthorized** y un conjunto de datos adicionales en el body, como el
+**status, error, mensaje, path.**
+
+**También podría lanzarse este método si ocurre un error en la autenticación** y no solamente por acceder a un recurso
+protegido sin antes estar autenticado.
+
+````java
+
+@Component
+public class JwtAuthenticationEntryPoint implements AuthenticationEntryPoint {
+    private static final Logger LOG = LoggerFactory.getLogger(JwtAuthenticationEntryPoint.class);
+
+    @Override
+    public void commence(HttpServletRequest request, HttpServletResponse response, AuthenticationException authException)
+            throws IOException, ServletException {
+        LOG.error("La solicitud requiere autenticación");
+
+        final Map<String, Object> body = new HashMap<>();
+        body.put("status", HttpServletResponse.SC_UNAUTHORIZED);
+        body.put("error", HttpStatus.UNAUTHORIZED.getReasonPhrase());
+        body.put("message", authException.getMessage());
+        body.put("path", request.getServletPath());
+        body.put("ejemplo", "Caracteres con Perú Ñandú");
+
+        final ObjectMapper mapper = new ObjectMapper();
+
+        // Configuramos la respuesta a retornar
+        response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+        response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
+        mapper.writeValue(response.getOutputStream(), body);
+    }
+}
+````
+
+**Donde**
+
+- **ObjectMapper**, nos permite convertir cualquier objeto en un JSON. proporciona funcionalidad para leer y escribir
+  JSON, ya sea hacia y desde POJO básicos (Plain Old Java Objects) o hacia y desde un modelo de árbol JSON de propósito
+  general (JsonNode), así como la funcionalidad relacionada para realizar conversiones.
+- **mapper.writeValue(response.getOutputStream(), body)**, usamos el método **writeValue(..)** para convertir el objeto
+  HashMap en un JSON. Este método se puede usar para serializar cualquier valor de Java como salida JSON, usando el
+  flujo de salida proporcionado, en nuestro caso usamos el response.getOutputStream() **(usando la codificación
+  JsonEncoding.UTF8).**
+
+## Creando una implementación del AccessDeniedHandler
+
+El método de nuestra implementación se ejecutará cada vez que ocurra un **AccessDeniedException**, es decir cuando un
+**usuario se autentica correctamente, pero está intentando acceder a un recurso para el que no tiene el permiso
+adecuado** y como respuesta le enviamos un **403 Forbidden** además de un conjunto de datos adicionales como el
+status, error, etc.
+
+````java
+
+@Component
+public class JwtAccessDeniedHandler implements AccessDeniedHandler {
+    private static final Logger LOG = LoggerFactory.getLogger(JwtAccessDeniedHandler.class);
+
+    @Override
+    public void handle(HttpServletRequest request, HttpServletResponse response, AccessDeniedException accessDeniedException)
+            throws IOException, ServletException {
+        LOG.error("La autenticación fue exitosa, pero no tiene privilegios para acceder al recurso solicitado");
+
+        final Map<String, Object> body = new HashMap<>();
+        body.put("status", HttpServletResponse.SC_FORBIDDEN);
+        body.put("error", HttpStatus.FORBIDDEN.getReasonPhrase());
+        body.put("message", accessDeniedException.getMessage());
+        body.put("path", request.getServletPath());
+
+        final ObjectMapper mapper = new ObjectMapper();
+
+        // Configuramos la respuesta a retornar
+        response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+        response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+        mapper.writeValue(response.getOutputStream(), body);
+    }
+}
+````
+
+## Agregando el JwtAuthenticationFilter, JwtAuthenticationEntryPoint y el JwtAccessDeniedHandler a la configuración
+
+Realizamos la inyección de dependencia de los 3 componentes desarrollados en esta sección dentro de nuestra clase de
+configuración principal de Spring Security.
+
+Quizá la configuración más importante que vale la pena comentar es el de nuestro filtro personalizado. Debemos agregar
+nuestro filtro **JwtAuthenticationFilter** antes del filtro **UsernamePasswordAuthenticationFilter** para que sea
+agregado en la cadena de filtros, precisamente antes de ese filtro.
+
+Recordemos que el **UsernamePasswordAuthenticationFilter** utiliza un tipo de autenticación basada en username y
+password, mientras que en nuestro filtro usamos un tipo de autenticación basado en tokens, donde los tokens JWT se
+utilizan para la autenticación en lugar de las credenciales tradicionales como usuario y contraseña. De todas maneras,
+en nuestra configuración no tenemos habilitado el filtro **UsernamePasswordAuthenticationFilter**, pero le estamos
+indicando a Spring Security que nuestro filtro personalizado lo ubique en una posición anterior a la ubicación donde
+estaría el filtro **UsernamePasswordAuthenticationFilter**.
+
+Para comprobar lo mencionado en el apartado anterior, habilité temporalmente el
+**formLogin(Customizer.withDefaults())**, luego ejecuté la aplicación e hice una petición a la lista de productos usando
+``curl -i http://localhost:8080/api/v1/products``, obviamente no voy a recibir la lista de productos porque necesito
+autenticarme, simplemente hice la petición para que en consola se muestre la lista de cadenas de filtro de seguridad,
+eso gracias a que tengo habilitado el ``@EnableWebSecurity(debug = true)``. Ahora, revisando el **Security filter
+chain** que se muestra en consola vemos que nuestro filtro **JwtAuthenticationFilter se encuentra ubicado antes del
+UsernamePasswordAuthenticationFilter**.
+
+````
+Security filter chain: [
+  DisableEncodeUrlFilter
+  WebAsyncManagerIntegrationFilter
+  SecurityContextHolderFilter
+  HeaderWriterFilter
+  LogoutFilter
+  JwtAuthenticationFilter                 <-----------
+  UsernamePasswordAuthenticationFilter    <-----------
+  RequestCacheAwareFilter
+  SecurityContextHolderAwareRequestFilter
+  AnonymousAuthenticationFilter
+  ExceptionTranslationFilter
+  AuthorizationFilter
+]
+````
+
+Ahora, quitamos la configuración del **formLogin(Customizer.withDefaults())** porque no lo requerimos en nuestra
+aplicación, volvemos a ejecutar y hacemos nuevamente una petición. Si revisamos la consola, veremos que el filtro
+**UsernamePasswordAuthenticationFilter** ya no está habilitado, mientras que nuestro filtro **JwtAuthenticationFilter**
+aún sigue manteniendo su posición dentro de la cadena de filtros.
+
+````
+Security filter chain: [
+  DisableEncodeUrlFilter
+  WebAsyncManagerIntegrationFilter
+  SecurityContextHolderFilter
+  HeaderWriterFilter
+  LogoutFilter
+  JwtAuthenticationFilter                 <-----------
+  RequestCacheAwareFilter
+  SecurityContextHolderAwareRequestFilter
+  AnonymousAuthenticationFilter
+  ExceptionTranslationFilter
+  AuthorizationFilter
+]
+````
+
+Otro cambio que hice fue quitarle la configuración que agrega el filtro para la autenticación HTTP Basic, me refiero
+al siguiente código: **httpBasic(Customizer.withDefaults())**, de esta manera, dejamos solo nuestro filtro de
+autenticación de JWT, eso significa que para poder acceder a cualquier recurso protegido ya no enviaremos en cada
+solicitud un user y un password en la cabecera, sino más bien, usaremos el jwt generado al hacer login previamente.
+
+Finalmente, hasta este punto, nuestra clase de configuración quedaría de la siguiente manera:
+
+````java
+
+@EnableWebSecurity(debug = true)
+@Configuration
+public class ApplicationSecurityConfig {
+    private final JwtAuthenticationFilter jwtAuthenticationFilter;
+    private final JwtAuthenticationEntryPoint jwtAuthenticationEntryPoint;
+    private final JwtAccessDeniedHandler jwtAccessDeniedHandler;
+
+    public ApplicationSecurityConfig(JwtAuthenticationFilter jwtAuthenticationFilter,
+                                     JwtAuthenticationEntryPoint jwtAuthenticationEntryPoint,
+                                     JwtAccessDeniedHandler jwtAccessDeniedHandler) {
+        this.jwtAuthenticationFilter = jwtAuthenticationFilter;
+        this.jwtAuthenticationEntryPoint = jwtAuthenticationEntryPoint;
+        this.jwtAccessDeniedHandler = jwtAccessDeniedHandler;
+    }
+
+    @Bean
+    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+        http
+                .csrf(AbstractHttpConfigurer::disable)
+                .authorizeHttpRequests(authorize -> {
+                    authorize.requestMatchers("/api/v1/auth/**").permitAll();
+                    authorize.anyRequest().authenticated();
+                })
+                .exceptionHandling(exceptionHandling -> {
+                    exceptionHandling.authenticationEntryPoint(this.jwtAuthenticationEntryPoint);
+                    exceptionHandling.accessDeniedHandler(this.jwtAccessDeniedHandler);
+                })
+                .addFilterBefore(this.jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
+        return http.build();
+    }
+}
+````
