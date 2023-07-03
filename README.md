@@ -1955,3 +1955,228 @@ Security filter chain: [
   AuthorizationFilter
 ]
 ````
+
+## Asegurando los endpoints en base a los roles de usuario
+
+Observemos la imagen inferior, para recordar cuál es el paso siguiente al proceso de autenticación. Vemos que luego
+de que ha ocurrido una autenticación exitosa, los detalles del usuario autenticado son almacenados en el SecurityContext
+y se reenvía la solicitud al **authentication filter**. El **authentication filter** decide si la llamada es permitida
+o no, para eso usa el detalle almacenado en el **Security Context**.
+
+![](./assets/02.Flow-authorization.png)
+
+Si observamos todas los **Security filter chain** mostrados a lo largo de este archivo, veremos que en la parte inferior
+se encuentra el filtro **AuthorizationFilter**, y se muestra como último filtro porque es, digamos, el filtro final
+luego de que ya ha pasado el proceso de autenticación.
+
+````
+Security filter chain: [
+  DisableEncodeUrlFilter
+  WebAsyncManagerIntegrationFilter
+  SecurityContextHolderFilter
+  HeaderWriterFilter
+  CorsFilter
+  LogoutFilter
+  JwtAuthenticationFilter
+  RequestCacheAwareFilter
+  SecurityContextHolderAwareRequestFilter
+  AnonymousAuthenticationFilter
+  SessionManagementFilter       
+  ExceptionTranslationFilter
+  AuthorizationFilter           <--------------------
+]
+````
+
+Nuestro **JwtAuthenticationFilter** luego de verificar que el **accessToken** sea válido, almacena la información
+el usuario en el **SecurityContext**:
+
+````
+SecurityContextHolder.getContext().setAuthentication(authentication);
+````
+
+Ahora, el **AuthorizationFilter** utilizará esa información para darle permiso al usuario de acceder a un endpoint
+en específico, según el rol que tenga definido.
+
+Podemos configurar el acceso a los endpoints en el mismo archivo de configuración de Spring Security, tal como lo
+tenemos configurado para el endpoint de **/auth**:
+
+````
+.authorizeHttpRequests(authorize -> {
+    authorize.requestMatchers("/api/v1/auth/**").permitAll();
+    authorize.anyRequest().authenticated();
+})
+````
+
+Pero en mi caso, lo haré de otra manera. Lo primero que haremos será agregar la anotación **@EnableMethodSecurity** en
+la clase de configuración principal de Spring Security. Esta anotación nos permite habilitar el uso de otras
+anotaciones, para nuestro caso el uso de la anotación **@PreAuthorize()** para establecer seguridad a nivel de método.
+
+````java
+
+@EnableMethodSecurity  //prePostEnabled = true (default)
+@EnableWebSecurity(debug = true)
+@Configuration
+public class ApplicationSecurityConfig {
+    /* omitted code */
+}
+````
+
+**NOTA**
+
+> En versiones anteriores de Spring Security, se usaba la anotación
+> **@EnableGlobalMethodSecurity(prePostEnabled = true)**, allí sí había la necesidad de especificar que habilite
+> la anotación **@PreAuthorize()** y **@PostAuthorize()**, ya que por defecto **prePostEnabled = false**.
+>
+> En nuestra versión de Spring Security **viene por defecto en true**, por eso tan solo necesitamos agregar la
+> anotación @EnableMethodSecurity, y listo.
+
+Ahora solo toca agregar la anotación **@PreAuthorize(...)** definiendo en su interior los roles que accederán a cada
+endpoint. Como estamos trabajando con ROLES, usamos los métodos **hasRole(...)**, **hasAnyRole(...)**, solo definimos
+el rol sin agregarle el prefijo **ROLE_**, serán los métodos **hasRole() y hasAnyRole()** quienes internamente lo hagan
+por nosotros.
+
+````java
+
+@RestController
+@RequestMapping(path = "/api/v1/products")
+public class ProductController {
+
+    /* omitted code */
+
+    @PreAuthorize("hasAnyRole('SUPER_ADMIN', 'ADMIN', 'USER')")
+    @GetMapping
+    public ResponseEntity<List<Product>> getAllProducts() { /* omitted code */ }
+
+    @PreAuthorize("hasAnyRole('SUPER_ADMIN', 'ADMIN', 'USER')")
+    @GetMapping(path = "/{id}")
+    public ResponseEntity<Product> getProduct(@PathVariable Long id) { /* omitted code */ }
+
+    @PreAuthorize("hasRole('ADMIN')")
+    @PostMapping
+    public ResponseEntity<Product> saveProduct(@RequestBody Product product) { /* omitted code */ }
+
+    @PreAuthorize("hasAnyRole('ADMIN')")
+    @PutMapping(path = "/{id}")
+    public ResponseEntity<Product> updateProduct(@PathVariable Long id, @RequestBody Product product) { /* omitted code */ }
+
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
+    @DeleteMapping(path = "/{id}")
+    public ResponseEntity<?> deleteProduct(@PathVariable Long id) { /* omitted code */ }
+}
+````
+
+Accediendo con el usuario **nuria**, role **USER** al listado de productos. Lo mismo debería suceder con los usuarios
+**martin y eli:**
+
+````bash
+curl -i -H "Authorization: Bearer eyJhbGciOiJIUzUxMiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJTeXN0ZW0iLCJhdWQiOlsiVXNlciIsIk1hbmFnYW1lbnQiLCJQb3J0YWwiXSwiaWF0IjoxNjg4MzQ3MjEzLCJzdWIiOiJudXJpYSIsImF1dGhvcml0aWVzIjpbIlJPTEVfVVNFUiJdLCJleHAiOjE2ODgzNDkwMTN9.b-MEzEp4O0xqQsfI2nXx92KXZIjbvNeLzXrqwP9AhDCwPzoAxmqkQoBTmz8zQ8TKMjhxweQ4Dy1pwSyh67Jdxg" http://localhost:8080/api/v1/products
+HTTP/1.1 200
+Vary: Origin
+Vary: Access-Control-Request-Method
+Vary: Access-Control-Request-Headers
+X-Content-Type-Options: nosniff
+X-XSS-Protection: 0
+Cache-Control: no-cache, no-store, max-age=0, must-revalidate
+Pragma: no-cache
+Expires: 0
+X-Frame-Options: DENY
+Content-Type: application/json
+Transfer-Encoding: chunked
+Date: Mon, 03 Jul 2023 01:22:18 GMT
+
+[
+  {"id":1,"name":"Pc gamer","price":3500.0},
+  {"id":2,"name":"Teclado inalámbrico","price":150.8},
+  {"id":3,"name":"Mouse inalámbrico","price":99.9},
+  {"id":4,"name":"Celular Samsung A7","price":5900.0}
+]
+````
+
+Accediendo con el usuario **nuria**, role **USER** para guardar un producto, sabiendo que ese endpoint está restringido
+solo para usuarios con rol **ADMIN**:
+
+````bash
+curl -i -X POST -H "Authorization: Bearer eyJhbGciOiJIUzUxMiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJTeXN0ZW0iLCJhdWQiOlsiVXNlciIsIk1hbmFnYW1lbnQiLCJQb3J0YWwiXSwiaWF0IjoxNjg4MzQ3MjEzLCJzdWIiOiJudXJpYSIsImF1dGhvcml0aWVzIjpbIlJPTEVfVVNFUiJdLCJleHAiOjE2ODgzNDkwMTN9.b-MEzEp4O0xqQsfI2nXx92KXZIjbvNeLzXrqwP9AhDCwPzoAxmqkQoBTmz8zQ8TKMjhxweQ4Dy1pwSyh67Jdxg" -H "Content-Type: application/json" -d "{\"name\": \"Bicicleta\", \"price\": 850.50}" http://localhost:8080/api/v1/products
+HTTP/1.1 403
+Vary: Origin
+Vary: Access-Control-Request-Method
+Vary: Access-Control-Request-Headers
+X-Content-Type-Options: nosniff
+X-XSS-Protection: 0
+Cache-Control: no-cache, no-store, max-age=0, must-revalidate
+Pragma: no-cache
+Expires: 0
+X-Frame-Options: DENY
+Content-Type: application/json
+Content-Length: 86
+Date: Mon, 03 Jul 2023 01:26:01 GMT
+
+{
+  "path":"/api/v1/products",
+  "error":"Forbidden",
+  "message":"Access Denied",
+  "status":403
+}
+````
+
+Ahora, accedemos al mismo endpoint para guardar un producto, pero con el accessToken correspondiente a un usuario cuyo
+rol es **ADMIN**, en este caso con el usuario **eli**:
+
+````bash
+curl -i -X POST -H "Authorization: Bearer eyJhbGciOiJIUzUxMiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJTeXN0ZW0iLCJhdWQiOlsiVXNlciIsIk1hbmFnYW1lbnQiLCJQb3J0YWwiXSwiaWF0IjoxNjg4MzQ3MjAxLCJzdWIiOiJlbGkiLCJhdXRob3JpdGllcyI6WyJST0xFX0FETUlOIl0sImV4cCI6MTY4ODM0OTAwMX0.BpuUbqSDwYFMTdnHJXexpA7i2COC311bIwmiIetn5p4L7s9BfHpxslf5MnWgepcHKi--mdaEixB2b9tyorKAVA" -H "Content-Type: application/json" -d "{\"name\": \"Bicicleta\", \"price\": 850.50}" http://localhost:8080/api/v1/products
+HTTP/1.1 201
+Vary: Origin
+Vary: Access-Control-Request-Method
+Vary: Access-Control-Request-Headers
+Location: /api/v1/products/5
+X-Content-Type-Options: nosniff
+X-XSS-Protection: 0
+Cache-Control: no-cache, no-store, max-age=0, must-revalidate
+Pragma: no-cache
+Expires: 0
+X-Frame-Options: DENY
+Content-Type: application/json
+Transfer-Encoding: chunked
+Date: Mon, 03 Jul 2023 01:28:38 GMT
+
+{"id":5,"name":"Bicicleta","price":850.5}
+````
+
+Ahora, tratamos de eliminar un producto con el accessToken correspondiente a un **ADMIN**, veremos que no se podrá,
+ya que dicho endpoint solo puede ser accedido por un usuario del tipo **SUPER_ADMIN**:
+
+````bash
+curl -i -X DELETE -H "Authorization: Bearer eyJhbGciOiJIUzUxMiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJTeXN0ZW0iLCJhdWQiOlsiVXNlciIsIk1hbmFnYW1lbnQiLCJQb3J0YWwiXSwiaWF0IjoxNjg4MzQ3MjAxLCJzdWIiOiJlbGkiLCJhdXRob3JpdGllcyI6WyJST0xFX0FETUlOIl0sImV4cCI6MTY4ODM0OTAwMX0.BpuUbqSDwYFMTdnHJXexpA7i2COC311bIwmiIetn5p4L7s9BfHpxslf5MnWgepcHKi--mdaEixB2b9tyorKAVA" http://localhost:8080/api/v1/products/3
+HTTP/1.1 403
+Vary: Origin
+Vary: Access-Control-Request-Method
+Vary: Access-Control-Request-Headers
+X-Content-Type-Options: nosniff
+X-XSS-Protection: 0
+Cache-Control: no-cache, no-store, max-age=0, must-revalidate
+Pragma: no-cache
+Expires: 0
+X-Frame-Options: DENY
+Content-Type: application/json
+Content-Length: 88
+Date: Mon, 03 Jul 2023 01:30:32 GMT
+
+{"path":"/api/v1/products/3","error":"Forbidden","message":"Access Denied","status":403}
+````
+
+Finalmente, accedemos al endpoint anterior con el usuario **martin** cuyo rol es **SUPER_ADMIN**:
+
+````bash
+curl -i -X DELETE -H "Authorization: Bearer eyJhbGciOiJIUzUxMiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJTeXN0ZW0iLCJhdWQiOlsiVXNlciIsIk1hbmFnYW1lbnQiLCJQb3J0YWwiXSwiaWF0IjoxNjg4MzQ3MTg1LCJzdWIiOiJtYXJ0aW4iLCJhdXRob3JpdGllcyI6WyJST0xFX1NVUEVSX0FETUlOIl0sImV4cCI6MTY4ODM0ODk4NX0.C5iChtuMdI74fiBqgcAHA0a811Rwd8AuVRMg_Vkv0Zlr4ByxebRQHxivjQWGCgJfre2tuiRwyq7_bRwVjTCLFQ" http://localhost:8080/api/v1/products/3
+HTTP/1.1 204
+Vary: Origin
+Vary: Access-Control-Request-Method
+Vary: Access-Control-Request-Headers
+X-Content-Type-Options: nosniff
+X-XSS-Protection: 0
+Cache-Control: no-cache, no-store, max-age=0, must-revalidate
+Pragma: no-cache
+Expires: 0
+X-Frame-Options: DENY
+Date: Mon, 03 Jul 2023 01:33:27 GMT
+````
