@@ -3,6 +3,7 @@ package com.magadiflo.jwt.template.project.app.business.controllers;
 import com.magadiflo.jwt.template.project.app.business.entities.Product;
 import com.magadiflo.jwt.template.project.app.business.services.ProductService;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.net.URI;
@@ -17,11 +18,13 @@ public class ProductController {
         this.productService = productService;
     }
 
+    @PreAuthorize("hasAnyRole('SUPER_ADMIN', 'ADMIN', 'USER')")
     @GetMapping
     public ResponseEntity<List<Product>> getAllProducts() {
         return ResponseEntity.ok(this.productService.findAllProducts());
     }
 
+    @PreAuthorize("hasAnyRole('SUPER_ADMIN', 'ADMIN', 'USER')")
     @GetMapping(path = "/{id}")
     public ResponseEntity<Product> getProduct(@PathVariable Long id) {
         return this.productService.findProductById(id)
@@ -29,6 +32,7 @@ public class ProductController {
                 .orElseGet(() -> ResponseEntity.notFound().build());
     }
 
+    @PreAuthorize("hasRole('ADMIN')")
     @PostMapping
     public ResponseEntity<Product> saveProduct(@RequestBody Product product) {
         Product productDB = this.productService.saveProduct(product);
@@ -36,6 +40,7 @@ public class ProductController {
         return ResponseEntity.created(productURI).body(productDB);
     }
 
+    @PreAuthorize("hasAnyRole('ADMIN')")
     @PutMapping(path = "/{id}")
     public ResponseEntity<Product> updateProduct(@PathVariable Long id, @RequestBody Product product) {
         return this.productService.updateProduct(id, product)
@@ -43,6 +48,7 @@ public class ProductController {
                 .orElseGet(() -> ResponseEntity.notFound().build());
     }
 
+    @PreAuthorize("hasRole('SUPER_ADMIN')")
     @DeleteMapping(path = "/{id}")
     public ResponseEntity<?> deleteProduct(@PathVariable Long id) {
         return this.productService.deleteProduct(id)
