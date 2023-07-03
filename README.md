@@ -1865,3 +1865,93 @@ Como vemos, ahora ya nos muestra la respuesta correcta, eso significa que nuestr
 y configurado en nuestro backend está funcionando, obviamente en la petición hemos tenido que mandarle un accessToken,
 ya que hasta este punto tenemos securizados los endpoints.
 
+## Configurando el SessionCreationPolicy STATELESS
+
+**Por defecto la aplicación en Spring Security trabaja con sesiones de usuario**, para comprobarlo haremos una llamada
+al endpoint de productos y veremos la cabecera de respuesta, una **cookie de sesión** o **cookie de identificación
+de sesión**. Esta cookie contiene un identificador único, como un ID de sesión, que se utiliza para asociar al cliente
+con una sesión específica en el servidor. La información real de la sesión se almacena en el servidor, no en la cookie
+en sí.
+
+````bash
+curl -i http://localhost:8080/api/v1/products
+HTTP/1.1 401
+...
+Set-Cookie: JSESSIONID=BC19E3876EC71DC70929286EBFBBEDD4; Path=/; HttpOnly <------------------------
+...
+
+{
+  "path":"/api/v1/products",
+  "error":"Unauthorized",
+  "message":"Full authentication is required to access this resource",
+  "status":401,
+  "ejemplo":"Caracteres con Perú Ñandú"
+}
+````
+
+Recordar que el concepto de sessions es individual de cada usuario que se conecta a nuestra aplicación y la información
+no es compartida entre ellos. Así pues, cada usuario dispondrá de su propio HashMap en donde almacenar la información
+que resulte útil entre páginas. Es accedida exclusivamente del lado del servidor.
+
+Ahora, si habilitamos la configuración para que nuestra aplicación sea del tipo **STATELESS** (sin estado), veremos que
+**Spring Security nunca creará un HttpSession y nunca la usará para obtener el SecurityContext.** Esto es útil en
+arquitecturas basadas en servicios web RESTful, donde cada solicitud debe contener toda la información necesaria para
+procesarla de manera independiente, sin depender del estado almacenado en el servidor:
+
+````java
+
+@EnableWebSecurity(debug = true)
+@Configuration
+public class ApplicationSecurityConfig {
+    /* omitted code */
+
+    @Bean
+    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+        http
+                /*omitted code*/
+                .sessionManagement(sessionManagement -> {
+                    sessionManagement.sessionCreationPolicy(SessionCreationPolicy.STATELESS);
+                });
+
+        /*omitted code*/
+        return http.build();
+    }
+}
+````
+
+Luego si volvemos a ejecutar la petición veremos que ya no tenemos la **cookie de sesión**:
+
+````bash
+curl -i http://localhost:8080/api/v1/products
+HTTP/1.1 401
+...
+
+{ 
+  "path":"/api/v1/products",
+  "error":"Unauthorized",
+  "message":"Full authentication is required to access this resource",
+  "status":401,
+  "ejemplo":"Caracteres con Perú Ñandú"
+}
+````
+
+Finalmente, podemos ver que, habiendo habilitado el **sessionManagement** en el archivo de configuración principal de
+Spring Security, podemos ver que se agrega un nuevo filtro, el **SessionManagementFilter**
+
+````
+Security filter chain: [
+  DisableEncodeUrlFilter
+  WebAsyncManagerIntegrationFilter
+  SecurityContextHolderFilter
+  HeaderWriterFilter
+  CorsFilter
+  LogoutFilter
+  JwtAuthenticationFilter
+  RequestCacheAwareFilter
+  SecurityContextHolderAwareRequestFilter
+  AnonymousAuthenticationFilter
+  SessionManagementFilter       <--------------------
+  ExceptionTranslationFilter
+  AuthorizationFilter
+]
+````
