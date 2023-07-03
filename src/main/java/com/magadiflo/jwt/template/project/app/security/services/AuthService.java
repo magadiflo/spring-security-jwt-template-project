@@ -47,8 +47,10 @@ public class AuthService {
         Optional<User> userOptional = this.userRepository.findUserByUsername(username);
         UserDetails userDetails = new SecurityUser(userOptional.orElseThrow());
         String accessToken = this.jwtTokenProvider.createAccessToken(userDetails);
+        String refreshToken = this.jwtTokenProvider.createRefreshToken(userDetails);
         LOG.info("Usuario logueado: {}", username);
         LOG.info("AccessToken: {}", accessToken);
-        return new LoginResponseDTO(username, accessToken, "--no-disponible-aún--");
+        LOG.info("RefreshToken: {}", refreshToken);
+        return new LoginResponseDTO(username, accessToken, refreshToken);
     }
 }
