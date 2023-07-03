@@ -50,7 +50,7 @@ public class JwtTokenProvider {
                 .sign(this.getAlgorithm());
     }
 
-    public boolean isAccessTokenValid(String token) {
+    public boolean isTokenValid(String token) {
         try {
             this.jwtVerifier().verify(token);
             return true;
@@ -70,7 +70,7 @@ public class JwtTokenProvider {
         return false;
     }
 
-    public String getSubjectFromAccessToken(String token) {
+    public String getSubjectFromToken(String token) {
         return this.decodedJWT(token).getSubject();
     }
 
