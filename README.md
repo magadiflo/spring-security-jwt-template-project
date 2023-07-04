@@ -1294,7 +1294,6 @@ public class AuthService {
     /* omitted code */
     private final JwtTokenProvider jwtTokenProvider;
     private final AuthenticationManager authenticationManager;
-    private final UserRepository userRepository;
 
     /* omitted constructor */
 
@@ -1302,7 +1301,8 @@ public class AuthService {
         Authentication authentication = this.authenticate(loginRequestDTO.username(), loginRequestDTO.password());
 
         // Si hasta este punto llega y no lanzó ningún error, significa que sí se autenticó correctamente
-        return this.loginResponse(authentication.getName());
+        SecurityUser securityUser = (SecurityUser) authentication.getPrincipal();
+        return this.loginResponse(securityUser);
     }
 
     private Authentication authenticate(String username, String password) {
@@ -1311,9 +1311,8 @@ public class AuthService {
     }
 
     @Transactional(readOnly = true)
-    private LoginResponseDTO loginResponse(String username) {
-        Optional<User> userOptional = this.userRepository.findUserByUsername(username);
-        UserDetails userDetails = new SecurityUser(userOptional.orElseThrow());
+    private LoginResponseDTO loginResponse(UserDetails userDetails) {
+        String username = userDetails.getUsername();
         String accessToken = this.jwtTokenProvider.createAccessToken(userDetails);
         LOG.info("Usuario logueado: {}", username);
         LOG.info("AccessToken: {}", accessToken);
@@ -1364,13 +1363,38 @@ pasada, devolviendo un objeto **Authentication** completo (incluidos los authori
 En pocas palabras, si la autenticación falla lanzará la excepción **AuthenticationException**, por lo tanto, el proceso
 de autenticación finaliza con la excepción.
 
-El método privado **loginResponse(username)**, recupera información de un User en función de su username, crea un
-UserDetails y a partir de él genera un **accessToken** para posteriormente devolverlos al cliente.
+El método privado **loginResponse(UserDetails userDetails)**, crea a partir del userDetails un **accessToken** para
+posteriormente devolverlos al cliente.
 
-Ahora sí, nuestro método público **login()**. Este método recibe el username y password del usuario, luego usa el
-método privado **authenticate()** para autenticar dichas credenciales. ``Si hasta ese punto el método privado
-authenticate() no lanza ninguna excepción, significa que se autenticó correctamente``. Finalmente, como respuesta el
-método **login()** responde con el objeto LoginResponseDTO poblado (con el username, accessToken, refreshToken).
+Ahora sí, nuestro método público **login()**. Este método recibe el username y password del usuario dentro del record
+loginRequestDTO, luego usa el método privado **authenticate()** para autenticar dichas credenciales.
+``Si hasta ese punto el método privado authenticate() no lanza ninguna excepción, significa que se autenticó
+correctamente``. Como se autenticó correctamente, obtenemos del objeto **authentication** el **Principal** autenticado
+utilizando el método **getPrincipal()**
+
+**IMPORTANTE**
+
+> Cuando hacemos una solicitud de autenticación, por ejemplo usando el
+> **UsernamePasswordAuthenticationToken(username, password)** de constructor de 2 parámetros, el principal sería el
+> **username** con el que nos intentaremos autenticar.
+>
+> Ahora, **cuando ya nos hemos autenticado correctamente**, el **principal** ahora es un **userDetails**, tal como lo
+> menciona la documentación: **"La implementación de AuthenticationManager a menudo devolverá un Authentication que
+> contiene información más rica como principal para que la use la aplicación. Muchos de los Authentication Providers
+> crearán un objeto UserDetails como principal."**
+
+Recordar que el **Authentication Provider** por defecto en la configuración de Spring Security es el
+**DaoAuthenticationProvider**, y como se menciona en el apartado de **IMPORTANTE**, este devuelve una implementación
+del Authentication con un **userDetails** como **Principal**, es por eso que en el método **login()** del que venimos
+hablando, hacemos un cast al **authentication.getPrincipal()** del tipo **SecurityUser** que es una implementación del
+**UserDetails**.
+
+````
+SecurityUser securityUser = (SecurityUser) authentication.getPrincipal();
+````
+
+Finalmente, como respuesta el método **login()** responde con el objeto LoginResponseDTO poblado (con el username,
+accessToken, refreshToken).
 
 ### Clases que interactúan en el proceso de autenticación del login
 
@@ -1479,8 +1503,11 @@ luego de haber validado el token y obtenido el username y authorities, necesitam
 autenticación con los 3 parámetros, ahora si revisamos dicho constructor veremos que tiene un
 **super.setAuthenticated(true)**.
 
-Luego de tener nuestra instancia autenticada, debemos registrarlo en el **Security Context**, tal cual lo hace el
-AuthenticationFilter una vez que ha verificado con éxito todo el proceso de autenticación.
+Luego de tener nuestra instancia Authentication, debemos registrarlo en el **Security Context**. Si recordamos el flujo
+en el proceso de autenticación donde intervienen un conjunto de componentes (AuthenticationFilter,
+AuthenticationManager, AuthenticationProvider, etc...), en ese flujo, quien hace el registro del usuario autenticado
+en el SecurityContext es el AuthenticationFilter, entonces, para nuestro caso tendríamos que nosotros hacerlo
+manualmente, tal como lo haría el AuthenticationFilter.
 
 **¿Por qué debemos registrarlo en el Security Context?**, porque después de haber realizado dicho registro, al finalizar
 los demás filtros, se delega la solicitud al **Authorization Filter** quien **usará los datos registrados en el Security
@@ -1539,6 +1566,63 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     }
 }
 ````
+
+**IMPORTANTE**
+
+> En nuestro filtro, estamos creando un objeto de la implementación Authentication, me refiero al
+> **UsernamePasswordAuthenticationToken(username, null, authorities)** de constructor de 3 parámetros. Aquí estoy
+> enviando el **username** como **principal**, un password en null y los authorities. Posteriormente, registramos
+> ese objeto en el **Security Context**.
+>
+> **¿Y eso por qué es importante?**, porque si continuamos con el flujo de la petición, luego de que el **Authorization
+> Filter** nos autoriza acceder al endpoint que hemos solicitado en la petición, entonces entraríamos a dicho endpoint,
+> y desde allí, podríamos acceder al **Security Context** y recuperar los detalles que hemos almacenado en él. En
+> nuestro caso podríamos hacerlo de esta manera:
+
+````java
+
+@RestController
+@RequestMapping(path = "/api/v1/products")
+public class ProductController {
+
+    @PreAuthorize("hasAnyRole('SUPER_ADMIN', 'ADMIN', 'USER')")
+    @GetMapping
+    public ResponseEntity<List<Product>> getAllProducts() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        String username = (String) authentication.getPrincipal();
+        System.out.println("username = " + username);
+        System.out.println("authorities = " + authentication.getAuthorities());
+
+        return ResponseEntity.ok(this.productService.findAllProducts());
+    }
+
+}
+````
+
+> En el código anterior, vemos que se muestra el @PreAuthorize(...), etc... son cosas que veremos más adelante, por
+> ahora solo quiero centrarme en la parte donde recuperamos del **Security Context** los detalles del usuario
+> autenticado. Entonces, retomando la idea inicial, en nuestro filtro guardamos el username como un **principal**,
+> por lo tanto, cuando recuperamos en el método hanlder el **.getPrincipal()**, debemos hacer un cast a un objeto
+> del tipo **String** porque eso fue lo que guardamos como principal en el filtro.
+>
+> También, podríamos haber guardado en vez de un **username**, un **userDetails como principal** en nuestro filtro, de
+> tal forma que ahora, para recuperar desde el método handler, haríamos un cast al tipo **userDetails** o a una
+> implementación del **userDetails** como en nuestro caso es el **SecurityUser**.
+
+````
+Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+UserDetails userDetails = (UserDetails) authentication.getPrincipal();
+````
+
+````
+Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+SecurityUser securityUser = (SecurityUser) authentication.getPrincipal();
+````
+
+> Y para finalizar, solo recordar, como se mencionó en algún apartado superior, cuando nos autenticamos utilizando el
+> AuthenticationManager, en todo ese proceso un AuthenticationProvider crea un objeto Authentication utilizando como
+> principal un userDetails, es por eso que, si revisamos el **AuthService**, método login(), veremos que cuando
+> obtenemos el getPrincipal() del objeto authentication hacemos un cast a una implementación del **UserDetails**.
 
 ## Creando una implementación del AuthenticationEntryPoint
 
@@ -2239,9 +2323,8 @@ accessToken como el refreshToken, para retornar al cliente.
 public class AuthService {
     /* omitted code */
     @Transactional(readOnly = true)
-    private LoginResponseDTO loginResponse(String username) {
-        Optional<User> userOptional = this.userRepository.findUserByUsername(username);
-        UserDetails userDetails = new SecurityUser(userOptional.orElseThrow());
+    private LoginResponseDTO loginResponse(UserDetails userDetails) {
+        String username = userDetails.getUsername();
         String accessToken = this.jwtTokenProvider.createAccessToken(userDetails);
         String refreshToken = this.jwtTokenProvider.createRefreshToken(userDetails);
         LOG.info("Usuario logueado: {}", username);
