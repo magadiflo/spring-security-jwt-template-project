@@ -499,13 +499,7 @@ por un lado, tenemos la Entity User propio del negocio, y, por otro lado, tenemo
 al que le llamaremos **SecurityUser**:
 
 ````java
-public class SecurityUser implements UserDetails {
-
-    private final User user;
-
-    public SecurityUser(User user) {
-        this.user = user;
-    }
+public record SecurityUser(User user) implements UserDetails {
 
     @Override
     public Collection<? extends GrantedAuthority> getAuthorities() {
@@ -544,13 +538,13 @@ public class SecurityUser implements UserDetails {
 }
 ````
 
-**NOTA**
+**NOTA 1**
 > Nuestro modelo de usuario SecurityUser es un usuario reconocido dentro de la arquitectura de Spring Security y eso es
 > porque hace una implementación de la interfaz **UserDetails**.
 >
 > El método getAuthorities() nos retorna una lita de Authorities o Roles o la mezcla de ambos, es decir, en este punto
 > Spring Security no hace una distinción y trata a ambos como authorities, entonces, **¿dónde se ve la diferencia?**,
-> esta diferencia radica cuando se aseguran los métodos ya sea usando **hasAuthority(...) o hasAnyAuthority(...)** en
+> esta diferencia se ve al asegurar los métodos handler del controller con **hasAuthority(...) o hasAnyAuthority(...)**
 > donde aquí se usarán los authorities o permisos definidos en nuestra lista, y si los métodos se aseguran con
 > **hasRole(...) o con hasAnyRole(...)** aquí se usarán los roles definidos en nuestra lista.
 >
@@ -559,6 +553,35 @@ public class SecurityUser implements UserDetails {
 > solo estamos trabajando con roles, podríamos haber definido nuestros authorities de la siguiente manera: **user:read,
 > user:write, admin:write, admin:read, delete, read, write, update, etc**, la forma cómo definamos nuestros authorities
 > o permisos ya depende de nosotros.
+
+**NOTA 2**
+> Para finalizar, este comentario es una actualización con respecto a nuestro **SecurityUser**. Inicialmente, lo había
+> trabajado como una clase, recibiendo por constructor el entity User y a partir de nuestra entity User los métodos
+> implementados del UserDetails retornaban el valor correspondiente del user. Para tener más claro lo que menciono,
+> el código inferior muestra cómo lo había trabajado inicialmente:
+
+````java
+public class SecurityUser implements UserDetails {
+
+    private final User user;
+
+    public SecurityUser(User user) {
+        this.user = user;
+    }
+
+    /* métodos implementados del UserDetails: getPassword(), getUsername(), etc.. */
+}
+````
+
+> Ahora, resulta que al llegar a la implementación del refresh token, para evitar realizar una llamada adicional al
+> servidor y recuperar la entity User, es que observé que la clase SecurityUser, internamente ya venía con el entity
+> User, pero este era privado. Así había la posibilidad de hacer público el atributo user o crear un método público
+> que exponga el atributo privado User, como un getter de User. Al realizar una de esas dos acciones, el **IDE IntelliJ
+> IDEA** me sugirió crear un **Record** y tenía sentido, ya que todos era métodos get o is, es decir métodos que
+> retornaban valores, no había ningún setter. Así que por eso opté por cambiar la clase a un record, y como observamos
+> también se puede implementar de una interfaz (eso sí o sí tiene que suceder, el de implementar la interfaz
+> UserDetails) y definir sus métodos, pero sobre todo, ahora sí podemos recuperar el entity User que se le pasa por
+> constructor, que era el caso que requería en la implementación del refresh token.
 
 ## Creando implementación del UserDetailsService y PasswordEncoder
 
