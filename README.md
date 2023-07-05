@@ -2287,3 +2287,147 @@ Expires: 0
 X-Frame-Options: DENY
 Date: Mon, 03 Jul 2023 01:33:27 GMT
 ````
+
+---
+
+## Implementando Entity Refresh Token
+
+Crearemos una nueva entity que permitirá almacenar el token que será usado como **refreshToken**. Para nuestro caso,
+**cada usuario tendrá solo un refreshToken y lo mismo en sentido contrario**, eso generaría una relación de uno a uno.
+Nuestra entity quedaría de esta manera:
+
+````java
+
+@Entity
+@Table(name = "refresh_tokens")
+public class RefreshToken {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+    @Column(nullable = false, unique = true)
+    private String token;
+    @Column(nullable = false)
+    private Instant expiration;
+
+    @OneToOne
+    @JoinColumn(name = "user_id", unique = true)
+    private User user;
+
+    /* omitted getters, setters, toString() */
+}
+````
+
+**DONDE**
+
+- **token**, contendrá el token que será usado como **refreshToken** para solicitar un nuevo **accessToken**.
+- **expiration**, la duración que estará vigente el **refreshToken**.
+
+**NOTA**
+> La propiedad expiration tiene un tipo de dato **Instant**. Instant es muy parecida al **LocalDateTime**, pero a la vez
+> muy diferente. Se usa para almacenar un punto determinado en el tiempo, o sea con fecha y hora, pero guarda su valor
+> como un timestamp de UNIX, es decir, **en nanosegundos** desde el epoch de UNIX (1/1/1970 a las 00:00) y **usando
+> la zona horaria UTC.** Es muy útil para manejar momentos en el tiempo de manera neutra e intercambiarlo entre
+> aplicaciones y sistemas.
+>
+> Esta clase define un instante concreto en una línea de tiempo y sirve habitualmente para calcular los tiempos que han
+> sucedido entre dos instantes concretos.
+>
+> **¿Y por qué no uso LocalDateTime en vez de Instant?**, porque LocalDateTime estaría más enfocado para trabajar con
+> fechas para humanos, mientras que el Instant a trabajar de una manera más precisa con fechas para computadoras.
+> [Esta último párrafo se obtuvo de aluracursos](https://www.aluracursos.com/blog/conozca-la-api-de-fechas-de-java-8)
+
+## Repositorio del RefreshToken
+
+Nuestro repositorio del refreshToken contendrá dos métodos personalizados para buscar una entity RefreshToken a partir
+de un token y el otro método a partir de un User.
+
+````java
+public interface IRefreshTokenRepository extends JpaRepository<RefreshToken, Long> {
+    Optional<RefreshToken> findRefreshTokenByToken(String token);
+
+    Optional<RefreshToken> findRefreshTokenByUser(User user);
+}
+````
+
+## Servicio RefreshToken
+
+Cuando creemos un refreshToken **siempre tendremos un solo refreshToken asociado al usuario en nuestra tabla de base de
+datos**, es por eso que en el método **createRefreshToken(User user)** buscamos si existe un registro en la tabla
+"refresh_tokens" asociado al usuario al que le crearemos un nuevo refreshToken, si existe, obtenemos su id, caso
+contrario nos retorna un null. Cuando lleguemos al punto de hacer el **save(refreshToken)**, este contendrá el id con
+el valor de la bd o valor null, de esa forma, hibernate sabrá si actualizar o realizar un guardado.
+
+````java
+
+@Service
+public class RefreshTokenService {
+    private static final Logger LOG = LoggerFactory.getLogger(RefreshTokenService.class);
+    private static final long EXPIRATION_REFRESH_TOKEN = 5 * 60 * 60 * 1000 + (60 * 1000); //5h 1m
+    private final IRefreshTokenRepository refreshTokenRepository;
+
+    public RefreshTokenService(IRefreshTokenRepository refreshTokenRepository) {
+        this.refreshTokenRepository = refreshTokenRepository;
+    }
+
+    @Transactional(readOnly = true)
+    public Optional<RefreshToken> findRefreshTokenByToken(String token) {
+        return this.refreshTokenRepository.findRefreshTokenByToken(token);
+    }
+
+    @Transactional
+    public RefreshToken createRefreshToken(User user) {
+        Long idUser = this.refreshTokenRepository.findRefreshTokenByUser(user)
+                .map(RefreshToken::getId)
+                .orElseGet(() -> null);
+
+        RefreshToken refreshToken = new RefreshToken();
+        refreshToken.setId(idUser);
+        refreshToken.setUser(user);
+        refreshToken.setExpiration(Instant.now().plusMillis(EXPIRATION_REFRESH_TOKEN));
+        refreshToken.setToken(UUID.randomUUID().toString());
+
+        return this.refreshTokenRepository.save(refreshToken);
+    }
+
+    @Transactional
+    public RefreshToken verifyExpiration(RefreshToken refreshToken) {
+        if (refreshToken.getExpiration().compareTo(Instant.now()) < 0) {
+            this.refreshTokenRepository.delete(refreshToken);
+            throw new RuntimeException("El refresh token ha expirado. Por favor vuelva a iniciar sesión.");
+        }
+        return refreshToken;
+    }
+}
+````
+
+## Actualizando el AuthService con el refreshToken
+
+Como recordaremos, en la actualización que hicimos de este archivo **README.md cambiamos de una clase a un record**
+a nuestro **SecurityUser**. En ese sentido, en el método **loginResponse(SecurityUser securityUser)** cambiamos
+de recibir un UserDetails a un SecurityUser, ya que con el SecurityUser podremos obtener el **User**
+
+````java
+
+@Service
+public class AuthService {
+    /* omitted code */
+    private final RefreshTokenService refreshTokenService;
+
+    /* omitted code */
+
+    @Transactional(readOnly = true)
+    private LoginResponseDTO loginResponse(SecurityUser securityUser) {
+        String username = securityUser.getUsername();
+        User user = securityUser.user();
+
+        String accessToken = this.jwtTokenProvider.createAccessToken(securityUser);
+        RefreshToken refreshToken = this.refreshTokenService.createRefreshToken(user);
+
+        LOG.info("Usuario logueado: {}", username);
+        LOG.info("AccessToken: {}", accessToken);
+        LOG.info("RefreshToken: {}", refreshToken.getToken());
+
+        return new LoginResponseDTO(username, accessToken, refreshToken.getToken());
+    }
+}
+````
