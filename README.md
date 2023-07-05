@@ -2431,3 +2431,44 @@ public class AuthService {
     }
 }
 ````
+
+## Probando refreshToken al hacer login
+
+````bash
+curl -i -H "Content-Type: application/json" -d "{\"username\": \"martin\", \"password\": \"12345\"}" http://localhost:8080/api/v1/auth/login
+HTTP/1.1 200
+Vary: Origin
+Vary: Access-Control-Request-Method
+Vary: Access-Control-Request-Headers
+X-Content-Type-Options: nosniff
+X-XSS-Protection: 0
+Cache-Control: no-cache, no-store, max-age=0, must-revalidate
+Pragma: no-cache
+Expires: 0
+X-Frame-Options: DENY
+Content-Type: application/json
+Transfer-Encoding: chunked
+Date: Wed, 05 Jul 2023 17:23:21 GMT
+
+{
+  "username":"martin",
+  "accessToken":"eyJhbGciOiJIUzUxMiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJTeXN0ZW0iLCJhdWQiOlsiVXNlciIsIk1hbmFnYW1lbnQiLCJQb3J0YWwiXSwiaWF0IjoxNjg4NTc3ODAxLCJzdWIiOiJtYXJ0aW4iLCJhdXRob3JpdGllcyI6WyJST0xFX1NVUEVSX0FETUlOIl0sImV4cCI6MTY4ODU3OTYwMX0._ZLTcdCMJaLQy1F2jIi-kwGjNjGFQoaBq8xGf8-U2BdyN-UWd7HeUkhA7gtEsli2kSXQDsdALEfeX3W8Qw5VKQ",
+  "refreshToken":"fd7dd612-a9ee-4e4b-9b15-207fba56c591"
+}
+````
+
+El registro en la tabla **refresh_tokens** sería:
+
+| id | user_id | token                                | expiration                 |
+|----|---------|--------------------------------------|----------------------------|
+| 1  | 1       | fd7dd612-a9ee-4e4b-9b15-207fba56c591 | 2023-07-05 22:24:21.232942 |
+
+Si observamos la **expiration** nos muestra un horario no similar al que actualmente tengo en mi pc y eso es porque el
+**Instant** usa la zona horaria **UTC** que para nuestro caso daría igual, ya que lo que buscamos con la expiración es
+que tenga un tiempo de vida límite. Además, recordar que a la **expiration** le sumamos 5h 1m.
+
+**NOTA**
+> Como token para el refreshToken usamos un UUID, ya que lo único que queremos es usarlo para generar un nuevo token,
+> mientras que en algunos cursos de **Amigos Code y GetArrays** usan como refreshToken un **jwt** sin definirle sus
+> roles o authorities ni algunos otros datos, solo generar un **jwt** con información básica. En mi caso opté por esta
+> otra forma, ya que lo vi en otros cursos de esta forma y me pareció interesante.
