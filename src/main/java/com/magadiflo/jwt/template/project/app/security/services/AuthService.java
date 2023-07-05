@@ -41,10 +41,8 @@ public class AuthService {
     private LoginResponseDTO loginResponse(UserDetails userDetails) {
         String username = userDetails.getUsername();
         String accessToken = this.jwtTokenProvider.createAccessToken(userDetails);
-        String refreshToken = this.jwtTokenProvider.createRefreshToken(userDetails);
         LOG.info("Usuario logueado: {}", username);
         LOG.info("AccessToken: {}", accessToken);
-        LOG.info("RefreshToken: {}", refreshToken);
-        return new LoginResponseDTO(username, accessToken, refreshToken);
+        return new LoginResponseDTO(username, accessToken, "-aún-no-implementado-");
     }
 }

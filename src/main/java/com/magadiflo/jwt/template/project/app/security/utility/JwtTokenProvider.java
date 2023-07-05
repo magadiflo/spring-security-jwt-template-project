@@ -23,7 +23,6 @@ import java.util.stream.Collectors;
 public class JwtTokenProvider {
     private static final Logger LOG = LoggerFactory.getLogger(JwtTokenProvider.class);
     private static final long EXPIRATION_ACCESS_TOKEN = 30 * 60 * 1000; //30min
-    private static final long EXPIRATION_REFRESH_TOKEN = (2 * EXPIRATION_ACCESS_TOKEN) + (4 * 60 * 60 * 1000) + (60 * 1000); //5h 1m
     private static final String AUTHORITIES = "authorities";
     private static final String ISSUER = "System";
     private static final String AUTHORIZATION = "Authorization";
@@ -39,14 +38,6 @@ public class JwtTokenProvider {
                 .withSubject(userDetails.getUsername())
                 .withClaim(AUTHORITIES, this.authoritiesToCreateAccessToken(userDetails))
                 .withExpiresAt(Instant.now().plusMillis(EXPIRATION_ACCESS_TOKEN))
-                .sign(this.getAlgorithm());
-    }
-
-    public String createRefreshToken(UserDetails userDetails) {
-        return JWT.create()
-                .withIssuer(ISSUER)
-                .withSubject(userDetails.getUsername())
-                .withExpiresAt(Instant.now().plusMillis(EXPIRATION_REFRESH_TOKEN))
                 .sign(this.getAlgorithm());
     }
 
