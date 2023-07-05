@@ -2,6 +2,7 @@ package com.magadiflo.jwt.template.project.app.security.services;
 
 import com.magadiflo.jwt.template.project.app.security.dto.LoginRequestDTO;
 import com.magadiflo.jwt.template.project.app.security.dto.LoginResponseDTO;
+import com.magadiflo.jwt.template.project.app.security.dto.TokenRequestDTO;
 import com.magadiflo.jwt.template.project.app.security.models.SecurityUser;
 import com.magadiflo.jwt.template.project.app.security.models.entities.RefreshToken;
 import com.magadiflo.jwt.template.project.app.security.models.entities.User;
@@ -12,7 +13,6 @@ import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class AuthService {
@@ -36,12 +36,30 @@ public class AuthService {
         return this.loginResponse(securityUser);
     }
 
+    public LoginResponseDTO renewLogin(TokenRequestDTO tokenRequestDTO) {
+        String token = tokenRequestDTO.refreshToken();
+        RefreshToken refreshToken = this.refreshTokenService.findRefreshTokenByToken(token)
+                .orElseThrow(() -> new RuntimeException("RefreshToken no encontrado. Inicie sesión."));
+
+        this.refreshTokenService.verifyExpiration(refreshToken);
+
+        User userDB = refreshToken.getUser();
+        String username = userDB.getUsername();
+        SecurityUser securityUser = new SecurityUser(userDB);
+        String accessToken = this.jwtTokenProvider.createAccessToken(securityUser);
+
+        LOG.info("Usuario renovado: {}", username);
+        LOG.info("AccessToken renovado: {}", accessToken);
+        LOG.info("RefreshToken actual: {}", token);
+
+        return new LoginResponseDTO(username, accessToken, token);
+    }
+
     private Authentication authenticate(String username, String password) {
         var authenticationToken = new UsernamePasswordAuthenticationToken(username, password);
         return this.authenticationManager.authenticate(authenticationToken);
     }
 
-    @Transactional(readOnly = true)
     private LoginResponseDTO loginResponse(SecurityUser securityUser) {
         String username = securityUser.getUsername();
         User user = securityUser.user();

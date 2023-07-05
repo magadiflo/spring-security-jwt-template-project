@@ -2432,7 +2432,7 @@ public class AuthService {
 }
 ````
 
-## Probando refreshToken al hacer login
+## Probando obtener el refreshToken al hacer login
 
 ````bash
 curl -i -H "Content-Type: application/json" -d "{\"username\": \"martin\", \"password\": \"12345\"}" http://localhost:8080/api/v1/auth/login
@@ -2472,3 +2472,111 @@ que tenga un tiempo de vida límite. Además, recordar que a la **expiration** l
 > mientras que en algunos cursos de **Amigos Code y GetArrays** usan como refreshToken un **jwt** sin definirle sus
 > roles o authorities ni algunos otros datos, solo generar un **jwt** con información básica. En mi caso opté por esta
 > otra forma, ya que lo vi en otros cursos de esta forma y me pareció interesante.
+
+## Obtener un nuevo accessToken a partir del refreshToken
+
+Primero crearemos un record como DTO para recibir el **refreshToken** enviado por el cliente:
+
+````java
+public record TokenRequestDTO(String refreshToken) {
+}
+````
+
+Ahora, en nuestro **AuthService** implementamos el método para renovar un accessToken cuando este haya vencido:
+
+````java
+
+@Service
+public class AuthService {
+    /* omitted code*/
+    public LoginResponseDTO renewLogin(TokenRequestDTO tokenRequestDTO) {
+        String token = tokenRequestDTO.refreshToken();
+        RefreshToken refreshToken = this.refreshTokenService.findRefreshTokenByToken(token)
+                .orElseThrow(() -> new RuntimeException("RefreshToken no encontrado. Inicie sesión."));
+
+        this.refreshTokenService.verifyExpiration(refreshToken);
+
+        User userDB = refreshToken.getUser();
+        String username = userDB.getUsername();
+        SecurityUser securityUser = new SecurityUser(userDB);
+        String accessToken = this.jwtTokenProvider.createAccessToken(securityUser);
+
+        LOG.info("Usuario renovado: {}", username);
+        LOG.info("AccessToken renovado: {}", accessToken);
+        LOG.info("RefreshToken actual: {}", token);
+
+        return new LoginResponseDTO(username, accessToken, token);
+    }
+    /* omitted code*/
+}
+````
+
+Finalmente, implementamos nuestro método hanlder que retornará nuestros accessToken renovado:
+
+````java
+
+@RestController
+@RequestMapping(path = "/api/v1/auth")
+public class AuthController {
+    /* omitted code */
+    @PostMapping(path = "/refresh-token")
+    public ResponseEntity<LoginResponseDTO> refreshToken(@RequestBody TokenRequestDTO tokenRequestDTO) {
+        return ResponseEntity.ok(this.authService.renewLogin(tokenRequestDTO));
+    }
+}
+````
+
+## Probando obtener un nuevo accessToken a partir del refreshToken
+
+Iniciamos sesión con el usuario martin y vemos los valores obtenidos:
+
+````bash
+curl -i -H "Content-Type: application/json" -d "{\"username\": \"martin\", \"password\": \"12345\"}" http://localhost:8080/api/v1/auth/login
+HTTP/1.1 200
+Vary: Origin
+Vary: Access-Control-Request-Method
+Vary: Access-Control-Request-Headers
+X-Content-Type-Options: nosniff
+X-XSS-Protection: 0
+Cache-Control: no-cache, no-store, max-age=0, must-revalidate
+Pragma: no-cache
+Expires: 0
+X-Frame-Options: DENY
+Content-Type: application/json
+Transfer-Encoding: chunked
+Date: Wed, 05 Jul 2023 22:16:07 GMT
+
+{
+  "username":"martin",
+  "accessToken":"eyJhbGciOiJIUzUxMiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJTeXN0ZW0iLCJhdWQiOlsiVXNlciIsIk1hbmFnYW1lbnQiLCJQb3J0YWwiXSwiaWF0IjoxNjg4NTk1MzY3LCJzdWIiOiJtYXJ0aW4iLCJhdXRob3JpdGllcyI6WyJST0xFX1NVUEVSX0FETUlOIl0sImV4cCI6MTY4ODU5NzE2N30.ABJlLpPIkBKvfLDnszavTNKylQ2QfWBtluqcvK2mJ0-aMNBteYEBWqfqro7cmJM4DsD_EQhDjTBzopCsjwQzsA",
+  "refreshToken":"55de7652-3f56-4348-8915-10849408c57c"
+}
+````
+
+Ahora, intentamos obtener un nuevo accessToken usando el refreshToken:
+
+````bash
+curl -i -X POST -H "Content-Type: application/json" -d "{\"refreshToken\": \"55de7652-3f56-4348-8915-10849408c57c\"}" http://localhost:8080/api/v1/auth/refresh-token
+HTTP/1.1 200
+Vary: Origin
+Vary: Access-Control-Request-Method
+Vary: Access-Control-Request-Headers
+X-Content-Type-Options: nosniff
+X-XSS-Protection: 0
+Cache-Control: no-cache, no-store, max-age=0, must-revalidate
+Pragma: no-cache
+Expires: 0
+X-Frame-Options: DENY
+Content-Type: application/json
+Transfer-Encoding: chunked
+Date: Wed, 05 Jul 2023 22:17:46 GMT
+
+{
+  "username":"martin",
+  "accessToken":"eyJhbGciOiJIUzUxMiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJTeXN0ZW0iLCJhdWQiOlsiVXNlciIsIk1hbmFnYW1lbnQiLCJQb3J0YWwiXSwiaWF0IjoxNjg4NTk1NDY2LCJzdWIiOiJtYXJ0aW4iLCJhdXRob3JpdGllcyI6WyJST0xFX1NVUEVSX0FETUlOIl0sImV4cCI6MTY4ODU5NzI2Nn0.SFtWqHoB9r7t1ZIvqZy2t7JyATdW3VanRqKIdRCHhY69Zk95KRQNhQZPsKnYSCz7EiwCZir1LUp1o6fdOr2aqQ",
+  "refreshToken":"55de7652-3f56-4348-8915-10849408c57c"
+}
+````
+
+Como observamos en los resultados anteriores, el **refreshToken** sigue siendo el mismo, mientras que el accessToken
+es uno distinto.
