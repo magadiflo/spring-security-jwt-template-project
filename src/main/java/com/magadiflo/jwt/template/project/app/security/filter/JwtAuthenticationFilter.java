@@ -38,13 +38,13 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
         String token = this.jwtTokenProvider.tokenFromRequest(request);
 
-        if (!this.jwtTokenProvider.isAccessTokenValid(token)) {
+        if (!this.jwtTokenProvider.isTokenValid(token)) {
             LOG.error("El access token proporcionado no pasó la validación de la librería auth0/java-jwt");
             filterChain.doFilter(request, response);
             return;
         }
 
-        String username = this.jwtTokenProvider.getSubjectFromAccessToken(token);
+        String username = this.jwtTokenProvider.getSubjectFromToken(token);
         List<GrantedAuthority> authorities = this.jwtTokenProvider.getAuthoritiesFromAccessToken(token);
 
         var authentication = new UsernamePasswordAuthenticationToken(username, null, authorities);
