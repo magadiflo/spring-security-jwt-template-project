@@ -43,7 +43,6 @@ public class RefreshTokenService {
         return this.refreshTokenRepository.save(refreshToken);
     }
 
-    @Transactional
     public RefreshToken verifyExpiration(RefreshToken refreshToken) {
         if (refreshToken.getExpiration().compareTo(Instant.now()) < 0) {
             this.refreshTokenRepository.delete(refreshToken);

@@ -2389,7 +2389,6 @@ public class RefreshTokenService {
         return this.refreshTokenRepository.save(refreshToken);
     }
 
-    @Transactional
     public RefreshToken verifyExpiration(RefreshToken refreshToken) {
         if (refreshToken.getExpiration().compareTo(Instant.now()) < 0) {
             this.refreshTokenRepository.delete(refreshToken);
@@ -2399,6 +2398,12 @@ public class RefreshTokenService {
     }
 }
 ````
+
+Es importante fijarnos que al método **verifyExpiration()** le quitamos la anotación **@Transactional**, ya que
+recordemos, la anotación @Transactional nos permitirá hacer rollback si algo falla dentro del método, pero casualmente
+eso es lo que buscamos cuando verificamos que el refreshToken ha expirado, lanzar una excepción, en ese sentido, si
+dejamos con la anotación @Transactional, va a revertir la eliminación que hacemos del refreshToken y en este caso en
+particular buscamos que se elimine el registro y luego lanzar una excepción sin que se reviertan los cambios.
 
 ## Actualizando el AuthService con el refreshToken
 
@@ -2704,7 +2709,6 @@ luego será capturada por el **@RestControllerAdvice**:
 @Service
 public class RefreshTokenService {
     /* omitted code */
-    @Transactional
     public RefreshToken verifyExpiration(RefreshToken refreshToken) {
         if (refreshToken.getExpiration().compareTo(Instant.now()) < 0) {
             this.refreshTokenRepository.delete(refreshToken);
@@ -2730,5 +2734,61 @@ public class AuthService {
         /* omitted code */
     }
     /* omitted code */
+}
+````
+
+## Probando nuestra excepción y respuesta personalizada
+
+Obteniendo un nuevo accessToken a partir de un refreshToken inválido:
+
+````bash
+curl -i -X POST -H "Content-Type: application/json" -d "{\"refreshToken\": \"350b9d96-1258-4896-b35c-c833cfa12f41\"}" http://localhost:8080/api/v1/auth/refresh-token
+HTTP/1.1 401
+Vary: Origin
+Vary: Access-Control-Request-Method
+Vary: Access-Control-Request-Headers
+X-Content-Type-Options: nosniff
+X-XSS-Protection: 0
+Cache-Control: no-cache, no-store, max-age=0, must-revalidate
+Pragma: no-cache
+Expires: 0
+X-Frame-Options: DENY
+Content-Type: application/json
+Transfer-Encoding: chunked
+Date: Thu, 06 Jul 2023 17:24:54 GMT
+
+{
+  "statusCode":401,
+  "httpStatus":"UNAUTHORIZED",
+  "reasonPhrase":"Unauthorized",
+  "message":"RefreshToken no encontrado. Inicie sesión.",
+  "timestamp":"2023-07-06T12:24:54.5496169"
+}
+````
+
+Obteniendo un accessToken a partir de un refreshToken caducado:
+
+````bash
+curl -i -X POST -H "Content-Type: application/json" -d "{\"refreshToken\": \"04f73a70-d669-45cc-b972-5b7091ef09b4\"}" http://localhost:8080/api/v1/auth/refresh-token
+HTTP/1.1 401
+Vary: Origin
+Vary: Access-Control-Request-Method
+Vary: Access-Control-Request-Headers
+X-Content-Type-Options: nosniff
+X-XSS-Protection: 0
+Cache-Control: no-cache, no-store, max-age=0, must-revalidate
+Pragma: no-cache
+Expires: 0
+X-Frame-Options: DENY
+Content-Type: application/json
+Transfer-Encoding: chunked
+Date: Thu, 06 Jul 2023 17:31:57 GMT
+
+{
+  "statusCode":401,
+  "httpStatus":"UNAUTHORIZED",
+  "reasonPhrase":"Unauthorized",
+  "message":"El refresh token ha expirado. Por favor vuelva a iniciar sesión.",
+  "timestamp":"2023-07-06T12:31:57.2926118"
 }
 ````
