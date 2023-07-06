@@ -22,7 +22,7 @@ import java.util.stream.Collectors;
 @Component
 public class JwtTokenProvider {
     private static final Logger LOG = LoggerFactory.getLogger(JwtTokenProvider.class);
-    private static final long EXPIRATION_ACCESS_TOKEN = 30 * 60 * 1000; //30min
+    private static final long EXPIRATION_ACCESS_TOKEN = 2 * 60 * 1000;//Test 2min //30 * 60 * 1000; //30min
     private static final String AUTHORITIES = "authorities";
     private static final String ISSUER = "System";
     private static final String AUTHORIZATION = "Authorization";

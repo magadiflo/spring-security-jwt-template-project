@@ -1,5 +1,6 @@
 package com.magadiflo.jwt.template.project.app.security.services;
 
+import com.magadiflo.jwt.template.project.app.security.exceptions.domain.RefreshTokenException;
 import com.magadiflo.jwt.template.project.app.security.models.entities.RefreshToken;
 import com.magadiflo.jwt.template.project.app.security.models.entities.User;
 import com.magadiflo.jwt.template.project.app.security.repositories.IRefreshTokenRepository;
@@ -15,7 +16,7 @@ import java.util.UUID;
 @Service
 public class RefreshTokenService {
     private static final Logger LOG = LoggerFactory.getLogger(RefreshTokenService.class);
-    private static final long EXPIRATION_REFRESH_TOKEN = 5 * 60 * 60 * 1000 + (60 * 1000); //5h 1m
+    private static final long EXPIRATION_REFRESH_TOKEN = 4 * 60 * 1000;//Test 4min //5 * 60 * 60 * 1000 + (60 * 1000); //5h 1m
     private final IRefreshTokenRepository refreshTokenRepository;
 
     public RefreshTokenService(IRefreshTokenRepository refreshTokenRepository) {
@@ -46,7 +47,7 @@ public class RefreshTokenService {
     public RefreshToken verifyExpiration(RefreshToken refreshToken) {
         if (refreshToken.getExpiration().compareTo(Instant.now()) < 0) {
             this.refreshTokenRepository.delete(refreshToken);
-            throw new RuntimeException("El refresh token ha expirado. Por favor vuelva a iniciar sesión.");
+            throw new RefreshTokenException("El refresh token ha expirado. Por favor vuelva a iniciar sesión.");
         }
         return refreshToken;
     }

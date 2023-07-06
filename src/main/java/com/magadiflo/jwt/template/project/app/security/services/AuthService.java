@@ -3,6 +3,7 @@ package com.magadiflo.jwt.template.project.app.security.services;
 import com.magadiflo.jwt.template.project.app.security.dto.LoginRequestDTO;
 import com.magadiflo.jwt.template.project.app.security.dto.LoginResponseDTO;
 import com.magadiflo.jwt.template.project.app.security.dto.TokenRequestDTO;
+import com.magadiflo.jwt.template.project.app.security.exceptions.domain.RefreshTokenException;
 import com.magadiflo.jwt.template.project.app.security.models.SecurityUser;
 import com.magadiflo.jwt.template.project.app.security.models.entities.RefreshToken;
 import com.magadiflo.jwt.template.project.app.security.models.entities.User;
@@ -39,7 +40,7 @@ public class AuthService {
     public LoginResponseDTO renewLogin(TokenRequestDTO tokenRequestDTO) {
         String token = tokenRequestDTO.refreshToken();
         RefreshToken refreshToken = this.refreshTokenService.findRefreshTokenByToken(token)
-                .orElseThrow(() -> new RuntimeException("RefreshToken no encontrado. Inicie sesión."));
+                .orElseThrow(() -> new RefreshTokenException("RefreshToken no encontrado. Inicie sesión."));
 
         this.refreshTokenService.verifyExpiration(refreshToken);
 

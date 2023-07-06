@@ -2580,3 +2580,155 @@ Date: Wed, 05 Jul 2023 22:17:46 GMT
 
 Como observamos en los resultados anteriores, el **refreshToken** sigue siendo el mismo, mientras que el accessToken
 es uno distinto.
+
+---
+
+## Definiendo excepción y respuesta personalizada
+
+Queremos mostrar una estructura propia de respuesta de mensajes en lugar de usar la respuesta de error predeterminada
+proporcionada por Spring Boot.
+
+En nuestro caso, crearemos un **Record**, ya que solo lo usaremos para retornar la estructura que contendrá nuestro
+mensaje al ocurrir una excepción. Podríamos haber usado una **Clase**, pero este habría requerido que definamos
+un constructor con todos los parámetros, métodos getters, etc., haciéndose más verboso la clase, precisamente para eso
+existen los **Records**.
+
+````java
+public record ExceptionHttpResponse(int statusCode, HttpStatus httpStatus, String reasonPhrase, String message,
+                                    LocalDateTime timestamp) {
+    public ExceptionHttpResponse(int statusCode, HttpStatus httpStatus, String reasonPhrase, String message) {
+        this(statusCode, httpStatus, reasonPhrase, message, LocalDateTime.now());
+    }
+}
+````
+
+Ahora, lo normal al definir un **Record** es que quede solamente con los parámetros que van a continuación del nombre
+del record. Pero para nuestro caso particular, requerimos que la propiedad **timestamp** tenga un valor por defecto,
+si es que no se le proporciona algún valor. Para solucionar ese problema, es que creamos explícitamente un constructor
+a nuestro record, que dicho sea de paso, debemos recordar que el Record nos proporciona por defecto un
+CONSTRUCTOR CANÓNICO, es decir, un constructor con los parámetros definidos en el record, pero en este caso, nosotros
+sobreescribiremos dicho constructor CANÓNICO, creando nuestro propio constructor y definiendo únicamente los parámetros
+obligatorios en el mismo orden que se definieron en el record **(sin el timestamp)**. Ahora, dentro de nuestro
+constructor, debemos llamar al **this(...)** pasándole todos los parámetros definidos en nuestro constructor
+personalizado e
+incluyendo el valor por defecto del **timestamp**. Este **this(...)** hace referencia a los parámetros del record.
+
+Como siguiente paso, crearemos nuestra excepción personalizada asociada al **refreshToken**, nuestra case se llamará
+**RefreshTokenException**, simplemente extendemos de la clase **RuntimeException**.
+
+````java
+public class RefreshTokenException extends RuntimeException {
+    public RefreshTokenException(String message) {
+        super(message);
+    }
+}
+````
+
+Una vez construido nuestro record y nuestra excepción personalizada, debemos crear un controlador que se encargue de
+manejar las excepciones que ocurran.
+
+````java
+
+@RestControllerAdvice
+public class GlobalExceptionHandler {
+    private final static Logger LOG = LoggerFactory.getLogger(GlobalExceptionHandler.class);
+
+    @ExceptionHandler(RefreshTokenException.class)
+    public ResponseEntity<ExceptionHttpResponse> refreshTokenException(RefreshTokenException e) {
+        LOG.error(e.getMessage());
+        return this.createExceptionHttpResponse(HttpStatus.UNAUTHORIZED, e.getMessage());
+    }
+
+    @ExceptionHandler(Exception.class)
+    public ResponseEntity<ExceptionHttpResponse> internalServerErrorException(Exception e) {
+        LOG.error(e.getMessage());
+        return this.createExceptionHttpResponse(HttpStatus.INTERNAL_SERVER_ERROR, "Error general");
+    }
+
+    private ResponseEntity<ExceptionHttpResponse> createExceptionHttpResponse(HttpStatus httpStatus, String message) {
+        ExceptionHttpResponse body = new ExceptionHttpResponse(httpStatus.value(), httpStatus, httpStatus.getReasonPhrase(), message);
+        return ResponseEntity.status(httpStatus).body(body);
+    }
+}
+````
+
+**¿Qué es la anotación @RestControllerAdvice?** Es una anotación utilizada para crear clases que se encargan de manejar
+excepciones globalmente en una aplicación basada en controladores REST (o en un controlador en específico).
+Cuando se lanza una excepción durante la ejecución de una solicitud HTTP en un controlador, Spring Boot buscará un
+@RestControllerAdvice para manejar esa excepción específica. Estas clases se utilizan para centralizar la lógica de
+manejo de excepciones en un solo lugar en lugar de tenerla dispersa en diferentes controladores.
+
+La anotación **@ExceptionHandler(...)** especifica qué excepción manejar, es decir, se encargarán de manejar las
+excepciones que se hayan detallado en la propia anotación. Por ejemplo, en nuestro método **refreshTokenException(...)**
+definimos dentro de la anotación **@ExceptionHandler(RefreshTokenException.class)** nuestra exception personalizada que
+construimos anteriormente, de esta forma, cada vez que se lance la excepción **RefreshTokenException** este método
+se va a encargar de manejarlo.
+
+Notar que definimos un método **internalServerErrorException(...)** para que maneje cualquier otra excepción que no
+hayamos definido.
+
+Cada vez que ocurra una excepción, esta será capturada por alguno de los métodos que tengamos definidos con la anotación
+@ExceptionHandler(), quienes finalmente retornarán un **ResponseEntity<>** con los mensajes correspondientes poblados
+en el **Record** que construimos al inicio.
+
+**NOTA**
+
+Fuente: [Adictos al trabajo](https://www.adictosaltrabajo.com/2017/06/29/manejo-de-excepciones-en-springmvc-ii/)
+
+> Como es de esperar, no siempre queremos aplicar esta solución (@RestControllerAdvice) a la totalidad de los
+> controladores, sino a un subconjunto concreto de los mismos. Esta situación tiene fácil solución, puesto que podemos
+> acotar su ámbito de aplicación de diferentes maneras:
+
+- **@RestControllerAdvice**, sin parámetros, el procesamiento global se realiza en todas las solicitudes de forma
+  predeterminada.
+- **@RestControllerAdvice(basePackages = {"com.libros", "com.usuarios"})**, permite especificar los paquetes base en los
+  que se buscarán los controladores para los que se aplicará la lógica definida en el controlador Global (
+  @RestControllerAdvice). En el ejemplo, se han especificado dos paquetes base: "com.libros" y "com.usuarios". Esto
+  significa que el controlador global asociado a esta anotación se aplicará a todos los controladores que se encuentren
+  en esos paquetes o en sus subpaquetes.
+- **@RestControllerAdvice(assignableTypes = {ThisInterface.class, ThatInterface.class})**, seleccionando el conjunto de
+  clases que extiendan una clase o implementen una interfaz.
+- **@RestControllerAdvice(assignableTypes = {AuthController.class})**, seleccionando un controlador específico al que se
+  aplicará el @RestControllerAdvice.
+- **@RestControllerAdvice(annotations = MyAnnotation.class)**, seleccionando el conjunto de clases anotadas de una
+  manera específica.
+
+## Lanzando nuestra excepción personalizada
+
+En el servicio **RefreshTokenService** definimos el método **verifyExpiration(RefreshToken refreshToken)** quien
+verifica si el refreshToken ha expirado o no, en caso de que haya expirado lanza nuestra excepción personalizada quien
+luego será capturada por el **@RestControllerAdvice**:
+
+````java
+
+@Service
+public class RefreshTokenService {
+    /* omitted code */
+    @Transactional
+    public RefreshToken verifyExpiration(RefreshToken refreshToken) {
+        if (refreshToken.getExpiration().compareTo(Instant.now()) < 0) {
+            this.refreshTokenRepository.delete(refreshToken);
+            throw new RefreshTokenException("El refresh token ha expirado. Por favor vuelva a iniciar sesión.");
+        }
+        return refreshToken;
+    }
+}
+````
+
+Lo mismo haremos en el servicio **AuthService**:
+
+````java
+
+@Service
+public class AuthService {
+    /* omitted code */
+    public LoginResponseDTO renewLogin(TokenRequestDTO tokenRequestDTO) {
+        String token = tokenRequestDTO.refreshToken();
+        RefreshToken refreshToken = this.refreshTokenService.findRefreshTokenByToken(token)
+                .orElseThrow(() -> new RefreshTokenException("RefreshToken no encontrado. Inicie sesión."));
+
+        /* omitted code */
+    }
+    /* omitted code */
+}
+````
