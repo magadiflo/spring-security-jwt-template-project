@@ -22,7 +22,7 @@ import java.util.stream.Collectors;
 @Component
 public class JwtTokenProvider {
     private static final Logger LOG = LoggerFactory.getLogger(JwtTokenProvider.class);
-    private static final long EXPIRATION_TIME = 30 * 60 * 1000; //30min
+    private static final long EXPIRATION_ACCESS_TOKEN = 2 * 60 * 1000;//Test 2min //30 * 60 * 1000; //30min
     private static final String AUTHORITIES = "authorities";
     private static final String ISSUER = "System";
     private static final String AUTHORIZATION = "Authorization";
@@ -37,11 +37,11 @@ public class JwtTokenProvider {
                 .withIssuedAt(new Date())
                 .withSubject(userDetails.getUsername())
                 .withClaim(AUTHORITIES, this.authoritiesToCreateAccessToken(userDetails))
-                .withExpiresAt(Instant.now().plusMillis(EXPIRATION_TIME))
+                .withExpiresAt(Instant.now().plusMillis(EXPIRATION_ACCESS_TOKEN))
                 .sign(this.getAlgorithm());
     }
 
-    public boolean isAccessTokenValid(String token) {
+    public boolean isTokenValid(String token) {
         try {
             this.jwtVerifier().verify(token);
             return true;
@@ -61,7 +61,7 @@ public class JwtTokenProvider {
         return false;
     }
 
-    public String getSubjectFromAccessToken(String token) {
+    public String getSubjectFromToken(String token) {
         return this.decodedJWT(token).getSubject();
     }
 

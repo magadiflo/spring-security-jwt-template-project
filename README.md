@@ -499,13 +499,7 @@ por un lado, tenemos la Entity User propio del negocio, y, por otro lado, tenemo
 al que le llamaremos **SecurityUser**:
 
 ````java
-public class SecurityUser implements UserDetails {
-
-    private final User user;
-
-    public SecurityUser(User user) {
-        this.user = user;
-    }
+public record SecurityUser(User user) implements UserDetails {
 
     @Override
     public Collection<? extends GrantedAuthority> getAuthorities() {
@@ -544,13 +538,13 @@ public class SecurityUser implements UserDetails {
 }
 ````
 
-**NOTA**
+**NOTA 1**
 > Nuestro modelo de usuario SecurityUser es un usuario reconocido dentro de la arquitectura de Spring Security y eso es
 > porque hace una implementación de la interfaz **UserDetails**.
 >
 > El método getAuthorities() nos retorna una lita de Authorities o Roles o la mezcla de ambos, es decir, en este punto
 > Spring Security no hace una distinción y trata a ambos como authorities, entonces, **¿dónde se ve la diferencia?**,
-> esta diferencia radica cuando se aseguran los métodos ya sea usando **hasAuthority(...) o hasAnyAuthority(...)** en
+> esta diferencia se ve al asegurar los métodos handler del controller con **hasAuthority(...) o hasAnyAuthority(...)**
 > donde aquí se usarán los authorities o permisos definidos en nuestra lista, y si los métodos se aseguran con
 > **hasRole(...) o con hasAnyRole(...)** aquí se usarán los roles definidos en nuestra lista.
 >
@@ -559,6 +553,35 @@ public class SecurityUser implements UserDetails {
 > solo estamos trabajando con roles, podríamos haber definido nuestros authorities de la siguiente manera: **user:read,
 > user:write, admin:write, admin:read, delete, read, write, update, etc**, la forma cómo definamos nuestros authorities
 > o permisos ya depende de nosotros.
+
+**NOTA 2**
+> Para finalizar, este comentario es una actualización con respecto a nuestro **SecurityUser**. Inicialmente, lo había
+> trabajado como una clase, recibiendo por constructor el entity User y a partir de nuestra entity User los métodos
+> implementados del UserDetails retornaban el valor correspondiente del user. Para tener más claro lo que menciono,
+> el código inferior muestra cómo lo había trabajado inicialmente:
+
+````java
+public class SecurityUser implements UserDetails {
+
+    private final User user;
+
+    public SecurityUser(User user) {
+        this.user = user;
+    }
+
+    /* métodos implementados del UserDetails: getPassword(), getUsername(), etc.. */
+}
+````
+
+> Ahora, resulta que al llegar a la implementación del refresh token, para evitar realizar una llamada adicional al
+> servidor y recuperar la entity User, es que observé que la clase SecurityUser, internamente ya venía con el entity
+> User, pero este era privado. Así había la posibilidad de hacer público el atributo user o crear un método público
+> que exponga el atributo privado User, como un getter de User. Al realizar una de esas dos acciones, el **IDE IntelliJ
+> IDEA** me sugirió crear un **Record** y tenía sentido, ya que todos era métodos get o is, es decir métodos que
+> retornaban valores, no había ningún setter. Así que por eso opté por cambiar la clase a un record, y como observamos
+> también se puede implementar de una interfaz (eso sí o sí tiene que suceder, el de implementar la interfaz
+> UserDetails) y definir sus métodos, pero sobre todo, ahora sí podemos recuperar el entity User que se le pasa por
+> constructor, que era el caso que requería en la implementación del refresh token.
 
 ## Creando implementación del UserDetailsService y PasswordEncoder
 
@@ -1294,7 +1317,6 @@ public class AuthService {
     /* omitted code */
     private final JwtTokenProvider jwtTokenProvider;
     private final AuthenticationManager authenticationManager;
-    private final UserRepository userRepository;
 
     /* omitted constructor */
 
@@ -1302,7 +1324,8 @@ public class AuthService {
         Authentication authentication = this.authenticate(loginRequestDTO.username(), loginRequestDTO.password());
 
         // Si hasta este punto llega y no lanzó ningún error, significa que sí se autenticó correctamente
-        return this.loginResponse(authentication.getName());
+        SecurityUser securityUser = (SecurityUser) authentication.getPrincipal();
+        return this.loginResponse(securityUser);
     }
 
     private Authentication authenticate(String username, String password) {
@@ -1311,9 +1334,8 @@ public class AuthService {
     }
 
     @Transactional(readOnly = true)
-    private LoginResponseDTO loginResponse(String username) {
-        Optional<User> userOptional = this.userRepository.findUserByUsername(username);
-        UserDetails userDetails = new SecurityUser(userOptional.orElseThrow());
+    private LoginResponseDTO loginResponse(UserDetails userDetails) {
+        String username = userDetails.getUsername();
         String accessToken = this.jwtTokenProvider.createAccessToken(userDetails);
         LOG.info("Usuario logueado: {}", username);
         LOG.info("AccessToken: {}", accessToken);
@@ -1364,13 +1386,38 @@ pasada, devolviendo un objeto **Authentication** completo (incluidos los authori
 En pocas palabras, si la autenticación falla lanzará la excepción **AuthenticationException**, por lo tanto, el proceso
 de autenticación finaliza con la excepción.
 
-El método privado **loginResponse(username)**, recupera información de un User en función de su username, crea un
-UserDetails y a partir de él genera un **accessToken** para posteriormente devolverlos al cliente.
+El método privado **loginResponse(UserDetails userDetails)**, crea a partir del userDetails un **accessToken** para
+posteriormente devolverlos al cliente.
 
-Ahora sí, nuestro método público **login()**. Este método recibe el username y password del usuario, luego usa el
-método privado **authenticate()** para autenticar dichas credenciales. ``Si hasta ese punto el método privado
-authenticate() no lanza ninguna excepción, significa que se autenticó correctamente``. Finalmente, como respuesta el
-método **login()** responde con el objeto LoginResponseDTO poblado (con el username, accessToken, refreshToken).
+Ahora sí, nuestro método público **login()**. Este método recibe el username y password del usuario dentro del record
+loginRequestDTO, luego usa el método privado **authenticate()** para autenticar dichas credenciales.
+``Si hasta ese punto el método privado authenticate() no lanza ninguna excepción, significa que se autenticó
+correctamente``. Como se autenticó correctamente, obtenemos del objeto **authentication** el **Principal** autenticado
+utilizando el método **getPrincipal()**
+
+**IMPORTANTE**
+
+> Cuando hacemos una solicitud de autenticación, por ejemplo usando el
+> **UsernamePasswordAuthenticationToken(username, password)** de constructor de 2 parámetros, el principal sería el
+> **username** con el que nos intentaremos autenticar.
+>
+> Ahora, **cuando ya nos hemos autenticado correctamente**, el **principal** ahora es un **userDetails**, tal como lo
+> menciona la documentación: **"La implementación de AuthenticationManager a menudo devolverá un Authentication que
+> contiene información más rica como principal para que la use la aplicación. Muchos de los Authentication Providers
+> crearán un objeto UserDetails como principal."**
+
+Recordar que el **Authentication Provider** por defecto en la configuración de Spring Security es el
+**DaoAuthenticationProvider**, y como se menciona en el apartado de **IMPORTANTE**, este devuelve una implementación
+del Authentication con un **userDetails** como **Principal**, es por eso que en el método **login()** del que venimos
+hablando, hacemos un cast al **authentication.getPrincipal()** del tipo **SecurityUser** que es una implementación del
+**UserDetails**.
+
+````
+SecurityUser securityUser = (SecurityUser) authentication.getPrincipal();
+````
+
+Finalmente, como respuesta el método **login()** responde con el objeto LoginResponseDTO poblado (con el username,
+accessToken, refreshToken).
 
 ### Clases que interactúan en el proceso de autenticación del login
 
@@ -1479,8 +1526,11 @@ luego de haber validado el token y obtenido el username y authorities, necesitam
 autenticación con los 3 parámetros, ahora si revisamos dicho constructor veremos que tiene un
 **super.setAuthenticated(true)**.
 
-Luego de tener nuestra instancia autenticada, debemos registrarlo en el **Security Context**, tal cual lo hace el
-AuthenticationFilter una vez que ha verificado con éxito todo el proceso de autenticación.
+Luego de tener nuestra instancia Authentication, debemos registrarlo en el **Security Context**. Si recordamos el flujo
+en el proceso de autenticación donde intervienen un conjunto de componentes (AuthenticationFilter,
+AuthenticationManager, AuthenticationProvider, etc...), en ese flujo, quien hace el registro del usuario autenticado
+en el SecurityContext es el AuthenticationFilter, entonces, para nuestro caso tendríamos que nosotros hacerlo
+manualmente, tal como lo haría el AuthenticationFilter.
 
 **¿Por qué debemos registrarlo en el Security Context?**, porque después de haber realizado dicho registro, al finalizar
 los demás filtros, se delega la solicitud al **Authorization Filter** quien **usará los datos registrados en el Security
@@ -1539,6 +1589,63 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     }
 }
 ````
+
+**IMPORTANTE**
+
+> En nuestro filtro, estamos creando un objeto de la implementación Authentication, me refiero al
+> **UsernamePasswordAuthenticationToken(username, null, authorities)** de constructor de 3 parámetros. Aquí estoy
+> enviando el **username** como **principal**, un password en null y los authorities. Posteriormente, registramos
+> ese objeto en el **Security Context**.
+>
+> **¿Y eso por qué es importante?**, porque si continuamos con el flujo de la petición, luego de que el **Authorization
+> Filter** nos autoriza acceder al endpoint que hemos solicitado en la petición, entonces entraríamos a dicho endpoint,
+> y desde allí, podríamos acceder al **Security Context** y recuperar los detalles que hemos almacenado en él. En
+> nuestro caso podríamos hacerlo de esta manera:
+
+````java
+
+@RestController
+@RequestMapping(path = "/api/v1/products")
+public class ProductController {
+
+    @PreAuthorize("hasAnyRole('SUPER_ADMIN', 'ADMIN', 'USER')")
+    @GetMapping
+    public ResponseEntity<List<Product>> getAllProducts() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        String username = (String) authentication.getPrincipal();
+        System.out.println("username = " + username);
+        System.out.println("authorities = " + authentication.getAuthorities());
+
+        return ResponseEntity.ok(this.productService.findAllProducts());
+    }
+
+}
+````
+
+> En el código anterior, vemos que se muestra el @PreAuthorize(...), etc... son cosas que veremos más adelante, por
+> ahora solo quiero centrarme en la parte donde recuperamos del **Security Context** los detalles del usuario
+> autenticado. Entonces, retomando la idea inicial, en nuestro filtro guardamos el username como un **principal**,
+> por lo tanto, cuando recuperamos en el método hanlder el **.getPrincipal()**, debemos hacer un cast a un objeto
+> del tipo **String** porque eso fue lo que guardamos como principal en el filtro.
+>
+> También, podríamos haber guardado en vez de un **username**, un **userDetails como principal** en nuestro filtro, de
+> tal forma que ahora, para recuperar desde el método handler, haríamos un cast al tipo **userDetails** o a una
+> implementación del **userDetails** como en nuestro caso es el **SecurityUser**.
+
+````
+Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+UserDetails userDetails = (UserDetails) authentication.getPrincipal();
+````
+
+````
+Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+SecurityUser securityUser = (SecurityUser) authentication.getPrincipal();
+````
+
+> Y para finalizar, solo recordar, como se mencionó en algún apartado superior, cuando nos autenticamos utilizando el
+> AuthenticationManager, en todo ese proceso un AuthenticationProvider crea un objeto Authentication utilizando como
+> principal un userDetails, es por eso que, si revisamos el **AuthService**, método login(), veremos que cuando
+> obtenemos el getPrincipal() del objeto authentication hacemos un cast a una implementación del **UserDetails**.
 
 ## Creando una implementación del AuthenticationEntryPoint
 
@@ -2179,4 +2286,509 @@ Pragma: no-cache
 Expires: 0
 X-Frame-Options: DENY
 Date: Mon, 03 Jul 2023 01:33:27 GMT
+````
+
+---
+
+## Implementando Entity Refresh Token
+
+Crearemos una nueva entity que permitirá almacenar el token que será usado como **refreshToken**. Para nuestro caso,
+**cada usuario tendrá solo un refreshToken y lo mismo en sentido contrario**, eso generaría una relación de uno a uno.
+Nuestra entity quedaría de esta manera:
+
+````java
+
+@Entity
+@Table(name = "refresh_tokens")
+public class RefreshToken {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+    @Column(nullable = false, unique = true)
+    private String token;
+    @Column(nullable = false)
+    private Instant expiration;
+
+    @OneToOne
+    @JoinColumn(name = "user_id", unique = true)
+    private User user;
+
+    /* omitted getters, setters, toString() */
+}
+````
+
+**DONDE**
+
+- **token**, contendrá el token que será usado como **refreshToken** para solicitar un nuevo **accessToken**.
+- **expiration**, la duración que estará vigente el **refreshToken**.
+
+**NOTA**
+> La propiedad expiration tiene un tipo de dato **Instant**. Instant es muy parecida al **LocalDateTime**, pero a la vez
+> muy diferente. Se usa para almacenar un punto determinado en el tiempo, o sea con fecha y hora, pero guarda su valor
+> como un timestamp de UNIX, es decir, **en nanosegundos** desde el epoch de UNIX (1/1/1970 a las 00:00) y **usando
+> la zona horaria UTC.** Es muy útil para manejar momentos en el tiempo de manera neutra e intercambiarlo entre
+> aplicaciones y sistemas.
+>
+> Esta clase define un instante concreto en una línea de tiempo y sirve habitualmente para calcular los tiempos que han
+> sucedido entre dos instantes concretos.
+>
+> **¿Y por qué no uso LocalDateTime en vez de Instant?**, porque LocalDateTime estaría más enfocado para trabajar con
+> fechas para humanos, mientras que el Instant a trabajar de una manera más precisa con fechas para computadoras.
+> [Esta último párrafo se obtuvo de aluracursos](https://www.aluracursos.com/blog/conozca-la-api-de-fechas-de-java-8)
+
+## Repositorio del RefreshToken
+
+Nuestro repositorio del refreshToken contendrá dos métodos personalizados para buscar una entity RefreshToken a partir
+de un token y el otro método a partir de un User.
+
+````java
+public interface IRefreshTokenRepository extends JpaRepository<RefreshToken, Long> {
+    Optional<RefreshToken> findRefreshTokenByToken(String token);
+
+    Optional<RefreshToken> findRefreshTokenByUser(User user);
+}
+````
+
+## Servicio RefreshToken
+
+Cuando creemos un refreshToken **siempre tendremos un solo refreshToken asociado al usuario en nuestra tabla de base de
+datos**, es por eso que en el método **createRefreshToken(User user)** buscamos si existe un registro en la tabla
+"refresh_tokens" asociado al usuario al que le crearemos un nuevo refreshToken, si existe, obtenemos su id, caso
+contrario nos retorna un null. Cuando lleguemos al punto de hacer el **save(refreshToken)**, este contendrá el id con
+el valor de la bd o valor null, de esa forma, hibernate sabrá si actualizar o realizar un guardado.
+
+````java
+
+@Service
+public class RefreshTokenService {
+    private static final Logger LOG = LoggerFactory.getLogger(RefreshTokenService.class);
+    private static final long EXPIRATION_REFRESH_TOKEN = 5 * 60 * 60 * 1000 + (60 * 1000); //5h 1m
+    private final IRefreshTokenRepository refreshTokenRepository;
+
+    public RefreshTokenService(IRefreshTokenRepository refreshTokenRepository) {
+        this.refreshTokenRepository = refreshTokenRepository;
+    }
+
+    @Transactional(readOnly = true)
+    public Optional<RefreshToken> findRefreshTokenByToken(String token) {
+        return this.refreshTokenRepository.findRefreshTokenByToken(token);
+    }
+
+    @Transactional
+    public RefreshToken createRefreshToken(User user) {
+        Long idUser = this.refreshTokenRepository.findRefreshTokenByUser(user)
+                .map(RefreshToken::getId)
+                .orElseGet(() -> null);
+
+        RefreshToken refreshToken = new RefreshToken();
+        refreshToken.setId(idUser);
+        refreshToken.setUser(user);
+        refreshToken.setExpiration(Instant.now().plusMillis(EXPIRATION_REFRESH_TOKEN));
+        refreshToken.setToken(UUID.randomUUID().toString());
+
+        return this.refreshTokenRepository.save(refreshToken);
+    }
+
+    public RefreshToken verifyExpiration(RefreshToken refreshToken) {
+        if (refreshToken.getExpiration().compareTo(Instant.now()) < 0) {
+            this.refreshTokenRepository.delete(refreshToken);
+            throw new RuntimeException("El refresh token ha expirado. Por favor vuelva a iniciar sesión.");
+        }
+        return refreshToken;
+    }
+}
+````
+
+Es importante fijarnos que al método **verifyExpiration()** le quitamos la anotación **@Transactional**, ya que
+recordemos, la anotación @Transactional nos permitirá hacer rollback si algo falla dentro del método, pero casualmente
+eso es lo que buscamos cuando verificamos que el refreshToken ha expirado, lanzar una excepción, en ese sentido, si
+dejamos con la anotación @Transactional, va a revertir la eliminación que hacemos del refreshToken y en este caso en
+particular buscamos que se elimine el registro y luego lanzar una excepción sin que se reviertan los cambios.
+
+## Actualizando el AuthService con el refreshToken
+
+Como recordaremos, en la actualización que hicimos de este archivo **README.md cambiamos de una clase a un record**
+a nuestro **SecurityUser**. En ese sentido, en el método **loginResponse(SecurityUser securityUser)** cambiamos
+de recibir un UserDetails a un SecurityUser, ya que con el SecurityUser podremos obtener el **User**
+
+````java
+
+@Service
+public class AuthService {
+    /* omitted code */
+    private final RefreshTokenService refreshTokenService;
+
+    /* omitted code */
+
+    @Transactional(readOnly = true)
+    private LoginResponseDTO loginResponse(SecurityUser securityUser) {
+        String username = securityUser.getUsername();
+        User user = securityUser.user();
+
+        String accessToken = this.jwtTokenProvider.createAccessToken(securityUser);
+        RefreshToken refreshToken = this.refreshTokenService.createRefreshToken(user);
+
+        LOG.info("Usuario logueado: {}", username);
+        LOG.info("AccessToken: {}", accessToken);
+        LOG.info("RefreshToken: {}", refreshToken.getToken());
+
+        return new LoginResponseDTO(username, accessToken, refreshToken.getToken());
+    }
+}
+````
+
+## Probando obtener el refreshToken al hacer login
+
+````bash
+curl -i -H "Content-Type: application/json" -d "{\"username\": \"martin\", \"password\": \"12345\"}" http://localhost:8080/api/v1/auth/login
+HTTP/1.1 200
+Vary: Origin
+Vary: Access-Control-Request-Method
+Vary: Access-Control-Request-Headers
+X-Content-Type-Options: nosniff
+X-XSS-Protection: 0
+Cache-Control: no-cache, no-store, max-age=0, must-revalidate
+Pragma: no-cache
+Expires: 0
+X-Frame-Options: DENY
+Content-Type: application/json
+Transfer-Encoding: chunked
+Date: Wed, 05 Jul 2023 17:23:21 GMT
+
+{
+  "username":"martin",
+  "accessToken":"eyJhbGciOiJIUzUxMiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJTeXN0ZW0iLCJhdWQiOlsiVXNlciIsIk1hbmFnYW1lbnQiLCJQb3J0YWwiXSwiaWF0IjoxNjg4NTc3ODAxLCJzdWIiOiJtYXJ0aW4iLCJhdXRob3JpdGllcyI6WyJST0xFX1NVUEVSX0FETUlOIl0sImV4cCI6MTY4ODU3OTYwMX0._ZLTcdCMJaLQy1F2jIi-kwGjNjGFQoaBq8xGf8-U2BdyN-UWd7HeUkhA7gtEsli2kSXQDsdALEfeX3W8Qw5VKQ",
+  "refreshToken":"fd7dd612-a9ee-4e4b-9b15-207fba56c591"
+}
+````
+
+El registro en la tabla **refresh_tokens** sería:
+
+| id | user_id | token                                | expiration                 |
+|----|---------|--------------------------------------|----------------------------|
+| 1  | 1       | fd7dd612-a9ee-4e4b-9b15-207fba56c591 | 2023-07-05 22:24:21.232942 |
+
+Si observamos la **expiration** nos muestra un horario no similar al que actualmente tengo en mi pc y eso es porque el
+**Instant** usa la zona horaria **UTC** que para nuestro caso daría igual, ya que lo que buscamos con la expiración es
+que tenga un tiempo de vida límite. Además, recordar que a la **expiration** le sumamos 5h 1m.
+
+**NOTA**
+> Como token para el refreshToken usamos un UUID, ya que lo único que queremos es usarlo para generar un nuevo token,
+> mientras que en algunos cursos de **Amigos Code y GetArrays** usan como refreshToken un **jwt** sin definirle sus
+> roles o authorities ni algunos otros datos, solo generar un **jwt** con información básica. En mi caso opté por esta
+> otra forma, ya que lo vi en otros cursos de esta forma y me pareció interesante.
+
+## Obtener un nuevo accessToken a partir del refreshToken
+
+Primero crearemos un record como DTO para recibir el **refreshToken** enviado por el cliente:
+
+````java
+public record TokenRequestDTO(String refreshToken) {
+}
+````
+
+Ahora, en nuestro **AuthService** implementamos el método para renovar un accessToken cuando este haya vencido:
+
+````java
+
+@Service
+public class AuthService {
+    /* omitted code*/
+    public LoginResponseDTO renewLogin(TokenRequestDTO tokenRequestDTO) {
+        String token = tokenRequestDTO.refreshToken();
+        RefreshToken refreshToken = this.refreshTokenService.findRefreshTokenByToken(token)
+                .orElseThrow(() -> new RuntimeException("RefreshToken no encontrado. Inicie sesión."));
+
+        this.refreshTokenService.verifyExpiration(refreshToken);
+
+        User userDB = refreshToken.getUser();
+        String username = userDB.getUsername();
+        SecurityUser securityUser = new SecurityUser(userDB);
+        String accessToken = this.jwtTokenProvider.createAccessToken(securityUser);
+
+        LOG.info("Usuario renovado: {}", username);
+        LOG.info("AccessToken renovado: {}", accessToken);
+        LOG.info("RefreshToken actual: {}", token);
+
+        return new LoginResponseDTO(username, accessToken, token);
+    }
+    /* omitted code*/
+}
+````
+
+Finalmente, implementamos nuestro método hanlder que retornará nuestros accessToken renovado:
+
+````java
+
+@RestController
+@RequestMapping(path = "/api/v1/auth")
+public class AuthController {
+    /* omitted code */
+    @PostMapping(path = "/refresh-token")
+    public ResponseEntity<LoginResponseDTO> refreshToken(@RequestBody TokenRequestDTO tokenRequestDTO) {
+        return ResponseEntity.ok(this.authService.renewLogin(tokenRequestDTO));
+    }
+}
+````
+
+## Probando obtener un nuevo accessToken a partir del refreshToken
+
+Iniciamos sesión con el usuario martin y vemos los valores obtenidos:
+
+````bash
+curl -i -H "Content-Type: application/json" -d "{\"username\": \"martin\", \"password\": \"12345\"}" http://localhost:8080/api/v1/auth/login
+HTTP/1.1 200
+Vary: Origin
+Vary: Access-Control-Request-Method
+Vary: Access-Control-Request-Headers
+X-Content-Type-Options: nosniff
+X-XSS-Protection: 0
+Cache-Control: no-cache, no-store, max-age=0, must-revalidate
+Pragma: no-cache
+Expires: 0
+X-Frame-Options: DENY
+Content-Type: application/json
+Transfer-Encoding: chunked
+Date: Wed, 05 Jul 2023 22:16:07 GMT
+
+{
+  "username":"martin",
+  "accessToken":"eyJhbGciOiJIUzUxMiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJTeXN0ZW0iLCJhdWQiOlsiVXNlciIsIk1hbmFnYW1lbnQiLCJQb3J0YWwiXSwiaWF0IjoxNjg4NTk1MzY3LCJzdWIiOiJtYXJ0aW4iLCJhdXRob3JpdGllcyI6WyJST0xFX1NVUEVSX0FETUlOIl0sImV4cCI6MTY4ODU5NzE2N30.ABJlLpPIkBKvfLDnszavTNKylQ2QfWBtluqcvK2mJ0-aMNBteYEBWqfqro7cmJM4DsD_EQhDjTBzopCsjwQzsA",
+  "refreshToken":"55de7652-3f56-4348-8915-10849408c57c"
+}
+````
+
+Ahora, intentamos obtener un nuevo accessToken usando el refreshToken:
+
+````bash
+curl -i -X POST -H "Content-Type: application/json" -d "{\"refreshToken\": \"55de7652-3f56-4348-8915-10849408c57c\"}" http://localhost:8080/api/v1/auth/refresh-token
+HTTP/1.1 200
+Vary: Origin
+Vary: Access-Control-Request-Method
+Vary: Access-Control-Request-Headers
+X-Content-Type-Options: nosniff
+X-XSS-Protection: 0
+Cache-Control: no-cache, no-store, max-age=0, must-revalidate
+Pragma: no-cache
+Expires: 0
+X-Frame-Options: DENY
+Content-Type: application/json
+Transfer-Encoding: chunked
+Date: Wed, 05 Jul 2023 22:17:46 GMT
+
+{
+  "username":"martin",
+  "accessToken":"eyJhbGciOiJIUzUxMiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJTeXN0ZW0iLCJhdWQiOlsiVXNlciIsIk1hbmFnYW1lbnQiLCJQb3J0YWwiXSwiaWF0IjoxNjg4NTk1NDY2LCJzdWIiOiJtYXJ0aW4iLCJhdXRob3JpdGllcyI6WyJST0xFX1NVUEVSX0FETUlOIl0sImV4cCI6MTY4ODU5NzI2Nn0.SFtWqHoB9r7t1ZIvqZy2t7JyATdW3VanRqKIdRCHhY69Zk95KRQNhQZPsKnYSCz7EiwCZir1LUp1o6fdOr2aqQ",
+  "refreshToken":"55de7652-3f56-4348-8915-10849408c57c"
+}
+````
+
+Como observamos en los resultados anteriores, el **refreshToken** sigue siendo el mismo, mientras que el accessToken
+es uno distinto.
+
+---
+
+## Definiendo excepción y respuesta personalizada
+
+Queremos mostrar una estructura propia de respuesta de mensajes en lugar de usar la respuesta de error predeterminada
+proporcionada por Spring Boot.
+
+En nuestro caso, crearemos un **Record**, ya que solo lo usaremos para retornar la estructura que contendrá nuestro
+mensaje al ocurrir una excepción. Podríamos haber usado una **Clase**, pero este habría requerido que definamos
+un constructor con todos los parámetros, métodos getters, etc., haciéndose más verboso la clase, precisamente para eso
+existen los **Records**.
+
+````java
+public record ExceptionHttpResponse(int statusCode, HttpStatus httpStatus, String reasonPhrase, String message,
+                                    LocalDateTime timestamp) {
+    public ExceptionHttpResponse(int statusCode, HttpStatus httpStatus, String reasonPhrase, String message) {
+        this(statusCode, httpStatus, reasonPhrase, message, LocalDateTime.now());
+    }
+}
+````
+
+Ahora, lo normal al definir un **Record** es que quede solamente con los parámetros que van a continuación del nombre
+del record. Pero para nuestro caso particular, requerimos que la propiedad **timestamp** tenga un valor por defecto,
+si es que no se le proporciona algún valor. Para solucionar ese problema, es que creamos explícitamente un constructor
+a nuestro record, que dicho sea de paso, debemos recordar que el Record nos proporciona por defecto un
+CONSTRUCTOR CANÓNICO, es decir, un constructor con los parámetros definidos en el record, pero en este caso, nosotros
+sobreescribiremos dicho constructor CANÓNICO, creando nuestro propio constructor y definiendo únicamente los parámetros
+obligatorios en el mismo orden que se definieron en el record **(sin el timestamp)**. Ahora, dentro de nuestro
+constructor, debemos llamar al **this(...)** pasándole todos los parámetros definidos en nuestro constructor
+personalizado e
+incluyendo el valor por defecto del **timestamp**. Este **this(...)** hace referencia a los parámetros del record.
+
+Como siguiente paso, crearemos nuestra excepción personalizada asociada al **refreshToken**, nuestra case se llamará
+**RefreshTokenException**, simplemente extendemos de la clase **RuntimeException**.
+
+````java
+public class RefreshTokenException extends RuntimeException {
+    public RefreshTokenException(String message) {
+        super(message);
+    }
+}
+````
+
+Una vez construido nuestro record y nuestra excepción personalizada, debemos crear un controlador que se encargue de
+manejar las excepciones que ocurran.
+
+````java
+
+@RestControllerAdvice
+public class GlobalExceptionHandler {
+    private final static Logger LOG = LoggerFactory.getLogger(GlobalExceptionHandler.class);
+
+    @ExceptionHandler(RefreshTokenException.class)
+    public ResponseEntity<ExceptionHttpResponse> refreshTokenException(RefreshTokenException e) {
+        LOG.error(e.getMessage());
+        return this.createExceptionHttpResponse(HttpStatus.UNAUTHORIZED, e.getMessage());
+    }
+
+    @ExceptionHandler(Exception.class)
+    public ResponseEntity<ExceptionHttpResponse> internalServerErrorException(Exception e) {
+        LOG.error(e.getMessage());
+        return this.createExceptionHttpResponse(HttpStatus.INTERNAL_SERVER_ERROR, "Error general");
+    }
+
+    private ResponseEntity<ExceptionHttpResponse> createExceptionHttpResponse(HttpStatus httpStatus, String message) {
+        ExceptionHttpResponse body = new ExceptionHttpResponse(httpStatus.value(), httpStatus, httpStatus.getReasonPhrase(), message);
+        return ResponseEntity.status(httpStatus).body(body);
+    }
+}
+````
+
+**¿Qué es la anotación @RestControllerAdvice?** Es una anotación utilizada para crear clases que se encargan de manejar
+excepciones globalmente en una aplicación basada en controladores REST (o en un controlador en específico).
+Cuando se lanza una excepción durante la ejecución de una solicitud HTTP en un controlador, Spring Boot buscará un
+@RestControllerAdvice para manejar esa excepción específica. Estas clases se utilizan para centralizar la lógica de
+manejo de excepciones en un solo lugar en lugar de tenerla dispersa en diferentes controladores.
+
+La anotación **@ExceptionHandler(...)** especifica qué excepción manejar, es decir, se encargarán de manejar las
+excepciones que se hayan detallado en la propia anotación. Por ejemplo, en nuestro método **refreshTokenException(...)**
+definimos dentro de la anotación **@ExceptionHandler(RefreshTokenException.class)** nuestra exception personalizada que
+construimos anteriormente, de esta forma, cada vez que se lance la excepción **RefreshTokenException** este método
+se va a encargar de manejarlo.
+
+Notar que definimos un método **internalServerErrorException(...)** para que maneje cualquier otra excepción que no
+hayamos definido.
+
+Cada vez que ocurra una excepción, esta será capturada por alguno de los métodos que tengamos definidos con la anotación
+@ExceptionHandler(), quienes finalmente retornarán un **ResponseEntity<>** con los mensajes correspondientes poblados
+en el **Record** que construimos al inicio.
+
+**NOTA**
+
+Fuente: [Adictos al trabajo](https://www.adictosaltrabajo.com/2017/06/29/manejo-de-excepciones-en-springmvc-ii/)
+
+> Como es de esperar, no siempre queremos aplicar esta solución (@RestControllerAdvice) a la totalidad de los
+> controladores, sino a un subconjunto concreto de los mismos. Esta situación tiene fácil solución, puesto que podemos
+> acotar su ámbito de aplicación de diferentes maneras:
+
+- **@RestControllerAdvice**, sin parámetros, el procesamiento global se realiza en todas las solicitudes de forma
+  predeterminada.
+- **@RestControllerAdvice(basePackages = {"com.libros", "com.usuarios"})**, permite especificar los paquetes base en los
+  que se buscarán los controladores para los que se aplicará la lógica definida en el controlador Global (
+  @RestControllerAdvice). En el ejemplo, se han especificado dos paquetes base: "com.libros" y "com.usuarios". Esto
+  significa que el controlador global asociado a esta anotación se aplicará a todos los controladores que se encuentren
+  en esos paquetes o en sus subpaquetes.
+- **@RestControllerAdvice(assignableTypes = {ThisInterface.class, ThatInterface.class})**, seleccionando el conjunto de
+  clases que extiendan una clase o implementen una interfaz.
+- **@RestControllerAdvice(assignableTypes = {AuthController.class})**, seleccionando un controlador específico al que se
+  aplicará el @RestControllerAdvice.
+- **@RestControllerAdvice(annotations = MyAnnotation.class)**, seleccionando el conjunto de clases anotadas de una
+  manera específica.
+
+## Lanzando nuestra excepción personalizada
+
+En el servicio **RefreshTokenService** definimos el método **verifyExpiration(RefreshToken refreshToken)** quien
+verifica si el refreshToken ha expirado o no, en caso de que haya expirado lanza nuestra excepción personalizada quien
+luego será capturada por el **@RestControllerAdvice**:
+
+````java
+
+@Service
+public class RefreshTokenService {
+    /* omitted code */
+    public RefreshToken verifyExpiration(RefreshToken refreshToken) {
+        if (refreshToken.getExpiration().compareTo(Instant.now()) < 0) {
+            this.refreshTokenRepository.delete(refreshToken);
+            throw new RefreshTokenException("El refresh token ha expirado. Por favor vuelva a iniciar sesión.");
+        }
+        return refreshToken;
+    }
+}
+````
+
+Lo mismo haremos en el servicio **AuthService**:
+
+````java
+
+@Service
+public class AuthService {
+    /* omitted code */
+    public LoginResponseDTO renewLogin(TokenRequestDTO tokenRequestDTO) {
+        String token = tokenRequestDTO.refreshToken();
+        RefreshToken refreshToken = this.refreshTokenService.findRefreshTokenByToken(token)
+                .orElseThrow(() -> new RefreshTokenException("RefreshToken no encontrado. Inicie sesión."));
+
+        /* omitted code */
+    }
+    /* omitted code */
+}
+````
+
+## Probando nuestra excepción y respuesta personalizada
+
+Obteniendo un nuevo accessToken a partir de un refreshToken inválido:
+
+````bash
+curl -i -X POST -H "Content-Type: application/json" -d "{\"refreshToken\": \"350b9d96-1258-4896-b35c-c833cfa12f41\"}" http://localhost:8080/api/v1/auth/refresh-token
+HTTP/1.1 401
+Vary: Origin
+Vary: Access-Control-Request-Method
+Vary: Access-Control-Request-Headers
+X-Content-Type-Options: nosniff
+X-XSS-Protection: 0
+Cache-Control: no-cache, no-store, max-age=0, must-revalidate
+Pragma: no-cache
+Expires: 0
+X-Frame-Options: DENY
+Content-Type: application/json
+Transfer-Encoding: chunked
+Date: Thu, 06 Jul 2023 17:24:54 GMT
+
+{
+  "statusCode":401,
+  "httpStatus":"UNAUTHORIZED",
+  "reasonPhrase":"Unauthorized",
+  "message":"RefreshToken no encontrado. Inicie sesión.",
+  "timestamp":"2023-07-06T12:24:54.5496169"
+}
+````
+
+Obteniendo un accessToken a partir de un refreshToken caducado:
+
+````bash
+curl -i -X POST -H "Content-Type: application/json" -d "{\"refreshToken\": \"04f73a70-d669-45cc-b972-5b7091ef09b4\"}" http://localhost:8080/api/v1/auth/refresh-token
+HTTP/1.1 401
+Vary: Origin
+Vary: Access-Control-Request-Method
+Vary: Access-Control-Request-Headers
+X-Content-Type-Options: nosniff
+X-XSS-Protection: 0
+Cache-Control: no-cache, no-store, max-age=0, must-revalidate
+Pragma: no-cache
+Expires: 0
+X-Frame-Options: DENY
+Content-Type: application/json
+Transfer-Encoding: chunked
+Date: Thu, 06 Jul 2023 17:31:57 GMT
+
+{
+  "statusCode":401,
+  "httpStatus":"UNAUTHORIZED",
+  "reasonPhrase":"Unauthorized",
+  "message":"El refresh token ha expirado. Por favor vuelva a iniciar sesión.",
+  "timestamp":"2023-07-06T12:31:57.2926118"
+}
 ````
