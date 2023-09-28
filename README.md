@@ -1133,16 +1133,19 @@ public class ApplicationSecurityConfig {
 
 **DONDE**
 
-- **@EnableWebSecurity(debug = true)**, agregue esta anotación a una clase @Configuration para tener la configuración de
-  Spring Security definida en cualquier WebSecurityConfigurer o, más probablemente, exponiendo un bean
-  SecurityFilterChain. **¿Necesito agregarlo a la clase de configuración?** Si no está utilizando spring-boot, sino solo
-  un proyecto de spring puro, definitivamente necesita agregar @EnableWebSecurity para habilitar spring-security. Pero
-  si está utilizando spring-boot 2.0 +, no necesita agregarlo usted mismo porque **la configuración automática de
-  spring-boot lo hará automáticamente si olvida hacerlo.** En mi caso, lo dejaré agregado, de todos modos requiero
-  mientras voy desarrollando que esté habilitado el ``debug=true``. Con el **debug=true** se puede **observar en consola
-  todos los filtros involucrados en la solicitud actual**. Por ejemplo, haciendo una petición a nuestro endpoint de
-  **/api/v1/auth/login** y con la configuración que viene por defecto en Spring Security, vemos en consola la lista de
-  los filtros involucrados:
+- **@EnableWebSecurity(...)**, nos `permite personalizar la configuración de seguridad de la aplicación`. Agregue esta
+  anotación a una clase @Configuration para tener la configuración de Spring Security definida en cualquier
+  WebSecurityConfigurer o, más probablemente, exponiendo un bean SecurityFilterChain.<br><br>
+
+  **¿Necesito agregarlo a la clase de configuración?** Si no está utilizando spring-boot, sino por el contrario,
+  un proyecto de spring puro, definitivamente necesita agregar **@EnableWebSecurity** para habilitar spring-security.
+  Pero si está utilizando spring-boot 2.0 +, no necesita agregarlo usted mismo porque **la configuración automática de
+  spring-boot lo hará automáticamente si olvida hacerlo.**<br><br>
+
+  En mi caso, lo dejaré agregado, de todos modos requiero mientras voy desarrollando que esté habilitado
+  el ``debug=true``. Con el **debug=true** se puede **observar en consola todos los filtros involucrados en la solicitud
+  actual**. Por ejemplo, haciendo una petición a nuestro endpoint de `/api/v1/auth/login` y con la configuración que
+  viene por defecto en Spring Security, vemos en consola la lista de los filtros involucrados:
 
   ````
   Security filter chain: [
@@ -1163,8 +1166,8 @@ public class ApplicationSecurityConfig {
     AuthorizationFilter
   ]
   ````
-
   Ahora, hacemos la misma petición usando nuestra propia configuración:
+
   ````
   Security filter chain: [
     DisableEncodeUrlFilter
@@ -1552,7 +1555,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             throws ServletException, IOException {
         if (!this.jwtTokenProvider.isBearerToken(request)) {
             LOG.error("No procesó la solicitud de autenticación porque no pudo encontrar el formato bearer token en " +
-                    "el encabezado de autorización");
+                      "el encabezado de autorización");
             filterChain.doFilter(request, response);
             return;
         }
